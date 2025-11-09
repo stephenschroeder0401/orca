@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp add:*)",
+      "WebSearch",
+      "WebFetch(domain:developers.notion.com)",
+      "Bash(claude mcp --help:*)",
+      "Bash(claude mcp:*)",
+      "WebFetch(domain:code.claude.com)",
+      "mcp__notion__notion-search",
+      "mcp__notion__notion-fetch",
+      "mcp__notion__notion-get-self",
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(supabase status:*)",
+      "Bash(supabase start:*)",
+      "Bash(node test-supabase.js:*)",
+      "Bash(xcode-select:*)",
+      "Bash(npm run ios:*)",
+      "Bash(npx expo install:*)",
+      "Bash(sudo xcode-select:*)",
+      "Bash(npm start)",
+      "Bash(xcrun simctl:*)",
+      "WebFetch(domain:reactnativereusables.com)",
+      "Bash(npx @react-native-reusables/cli@latest init)",
+      "Bash(npx @react-native-reusables/cli@latest add:*)",
+      "Bash(supabase migration:*)",
+      "Bash(npx @react-native-reusables/cli@latest init -y)",
+      "Bash(psql:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(npm cache clean:*)",
+      "Bash(cat:*)",
+      "Bash(killall:*)",
+      "Bash(kill:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
