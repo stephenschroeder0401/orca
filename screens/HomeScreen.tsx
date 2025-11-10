@@ -25,15 +25,6 @@ interface BillingCategory {
   name: string;
 }
 
-interface TimeEntry {
-  id: string;
-  start_ts: string;
-  end_ts: string;
-  duration_minutes: number;
-  property_id: string | null;
-  billing_category_id: string | null;
-}
-
 export default function HomeScreen() {
   const [task, setTask] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -42,7 +33,6 @@ export default function HomeScreen() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [billingCategories, setBillingCategories] = useState<BillingCategory[]>([]);
-  const [timeEntry, setTimeEntry] = useState<TimeEntry | null>(null);
 
   const slideAnim = useState(new Animated.Value(0))[0];
 
@@ -50,7 +40,19 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchProperties();
     fetchBillingCategories();
+    testOrcaQuery();
   }, []);
+
+  async function testOrcaQuery() {
+    console.log('Testing clock_sessions query...');
+    const { data, error } = await supabase
+      .schema('orca')
+      .from('clock_sessions')
+      .select('*')
+      .limit(1);
+
+    console.log('Clock sessions query result:', { data, error });
+  }
 
   // Timer effect
   useEffect(() => {
@@ -132,15 +134,39 @@ export default function HomeScreen() {
     if (!task.trim()) return;
 
     try {
-      const { data, error } = await supabase.rpc('start_clock_session', {
-        p_notes: task,
-        p_property_id: properties[0]?.id || null,
-        p_billing_category_id: billingCategories[0]?.id || null,
-      });
+      // Get current user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      console.log('Auth user:', user);
+      console.log('Auth error:', authError);
+      if (!user) throw new Error('Not authenticated');
+
+      // Get client_id from user_account
+      const { data: userAccount, error: accountError } = await supabase
+        .from('user_account')
+        .select('client_id')
+        .eq('user_id', user.id)
+        .single();
+
+      console.log('User account:', userAccount);
+      console.log('Account error:', accountError);
+      if (!userAccount?.client_id) throw new Error('No client associated with user');
+
+      const { data, error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .insert({
+          user_id: user.id,
+          client_id: userAccount.client_id,
+          notes: task,
+          property_id: properties[0]?.id || null,
+          billing_category_id: billingCategories[0]?.id || null,
+        })
+        .select('id')
+        .single();
 
       if (error) throw error;
 
-      setSessionId(data);
+      setSessionId(data.id);
       setStartTime(new Date());
 
       // Slide in the End Session button
@@ -152,7 +178,8 @@ export default function HomeScreen() {
       }).start();
     } catch (error: any) {
       console.error('Error starting session:', error);
-      Alert.alert('Error', error.message || 'Failed to start session');
+      console.error('Error details:', JSON.stringify(error, null, 2));
+      Alert.alert('Error', error.message || error.toString() || 'Failed to start session');
     }
   }
 
@@ -160,14 +187,17 @@ export default function HomeScreen() {
     if (!sessionId) return;
 
     try {
-      const { data, error } = await supabase.rpc('stop_clock_session', {
-        p_session_id: sessionId,
-      });
+      const now = new Date().toISOString();
+
+      const { error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .update({ end_ts: now })
+        .eq('id', sessionId);
 
       if (error) throw error;
 
-      // The function now returns the time entry data
-      setTimeEntry(data);
+      // Session ended successfully
       setSessionId(null);
       setStartTime(null);
       setElapsedSeconds(0);
@@ -273,24 +303,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </Animated.View>
           )}
-
-          {/* Time Entry Row */}
-          {timeEntry && (
-            <View style={styles.timeEntryRow}>
-              <Text style={styles.timeEntryTitle}>Last Session</Text>
-              <Text style={styles.timeEntryDuration}>
-                {timeEntry.duration_minutes} minutes
-              </Text>
-              <Text style={styles.timeEntryLabel}>Property</Text>
-              <Text style={styles.timeEntryValue}>
-                {properties.find(p => p.id === timeEntry.property_id)?.name || 'None'}
-              </Text>
-              <Text style={styles.timeEntryLabel}>Billing Category</Text>
-              <Text style={styles.timeEntryValue}>
-                {billingCategories.find(b => b.id === timeEntry.billing_category_id)?.name || 'None'}
-              </Text>
-            </View>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -375,39 +387,5 @@ const styles = StyleSheet.create({
   },
   endButton: {
     borderColor: '#dc2626',
-  },
-  timeEntryRow: {
-    width: '100%',
-    maxWidth: 400,
-    marginTop: 32,
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-  },
-  timeEntryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0a0a0a',
-    marginBottom: 12,
-  },
-  timeEntryDuration: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-  },
-  timeEntryLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#999',
-    marginTop: 12,
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  timeEntryValue: {
-    fontSize: 15,
-    color: '#0a0a0a',
   },
 });
