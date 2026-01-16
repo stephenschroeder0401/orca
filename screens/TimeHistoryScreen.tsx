@@ -294,8 +294,11 @@ export default function TimeHistoryScreen() {
         item={entry}
         property={property}
         billingCategory={billingCategory}
+        properties={properties}
+        billingCategories={billingCategories}
         onDelete={handleDelete}
         onEdit={handleEdit}
+        onUpdate={fetchTimeEntries}
         formatDate={formatDate}
         formatTime={formatTime}
         formatDuration={(startTs: string, endTs: string | null) => formatDuration(startTs, endTs)}
