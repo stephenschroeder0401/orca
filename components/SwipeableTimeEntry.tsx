@@ -20,8 +20,8 @@ const ACTION_WIDTH = 80;
 
 interface TimeEntry {
   id: string;
-  start_ts: string;
-  end_ts: string | null;
+  start_time: string;
+  end_time: string | null;
   property_id: string | null;
   billing_category_id: string | null;
   notes: string | null;
@@ -133,15 +133,15 @@ export default function SwipeableTimeEntry({
           }}
         >
           <View style={styles.entryHeader}>
-            <Text style={styles.entryDate}>{formatDate(item.start_ts)}</Text>
+            <Text style={styles.entryDate}>{formatDate(item.start_time)}</Text>
             <Text style={styles.entryDuration}>
-              {formatDuration(item.start_ts, item.end_ts)}
+              {formatDuration(item.start_time, item.end_time)}
             </Text>
           </View>
 
           <View style={styles.entryTime}>
             <Text style={styles.entryTimeText}>
-              {formatTime(item.start_ts)} - {item.end_ts ? formatTime(item.end_ts) : 'In Progress'}
+              {formatTime(item.start_time)} - {item.end_time ? formatTime(item.end_time) : 'In Progress'}
             </Text>
           </View>
 

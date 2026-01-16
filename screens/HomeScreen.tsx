@@ -13,7 +13,17 @@ import {
   ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { supabase } from '../lib/supabase';
+import { useNavigation, DrawerActions } from '@react-navigation/native';
+import { supabase } from '~/lib/supabase';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  NativeSelectScrollView,
+  type Option,
+} from '~/components/ui/select';
 
 interface Property {
   id: string;
@@ -26,6 +36,7 @@ interface BillingCategory {
 }
 
 export default function HomeScreen() {
+  const navigation = useNavigation();
   const [task, setTask] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
@@ -33,6 +44,8 @@ export default function HomeScreen() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [billingCategories, setBillingCategories] = useState<BillingCategory[]>([]);
+  const [selectedProperty, setSelectedProperty] = useState<Option>(undefined);
+  const [selectedBillingCategory, setSelectedBillingCategory] = useState<Option>(undefined);
 
   const slideAnim = useState(new Animated.Value(0))[0];
 
@@ -95,6 +108,7 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
+      console.log('Fetched properties:', data);
       setProperties(data || []);
     } catch (error) {
       console.error('Error fetching properties:', error);
@@ -124,6 +138,7 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
+      console.log('Fetched billing categories:', data);
       setBillingCategories(data || []);
     } catch (error) {
       console.error('Error fetching billing categories:', error);
@@ -158,8 +173,8 @@ export default function HomeScreen() {
           user_id: user.id,
           client_id: userAccount.client_id,
           notes: task,
-          property_id: properties[0]?.id || null,
-          billing_category_id: billingCategories[0]?.id || null,
+          property_id: selectedProperty?.value || null,
+          billing_category_id: selectedBillingCategory?.value || null,
         })
         .select('id')
         .single();
@@ -169,7 +184,7 @@ export default function HomeScreen() {
       setSessionId(data.id);
       setStartTime(new Date());
 
-      // Slide in the End Session button
+      // Animate the End Session button sliding in
       Animated.spring(slideAnim, {
         toValue: 1,
         tension: 50,
@@ -192,24 +207,22 @@ export default function HomeScreen() {
       const { error } = await supabase
         .schema('orca')
         .from('clock_sessions')
-        .update({ end_ts: now })
+        .update({ end_time: now })
         .eq('id', sessionId);
 
       if (error) throw error;
 
-      // Session ended successfully
+      // Reset state
       setSessionId(null);
       setStartTime(null);
       setElapsedSeconds(0);
       setTask('');
+      setSelectedProperty(undefined);
+      setSelectedBillingCategory(undefined);
+      slideAnim.setValue(0);
 
-      // Slide out the End Session button
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        tension: 50,
-        friction: 7,
-        useNativeDriver: true,
-      }).start();
+      // Navigate to history
+      navigation.dispatch(DrawerActions.openDrawer());
     } catch (error: any) {
       console.error('Error stopping session:', error);
       Alert.alert('Error', error.message || 'Failed to stop session');
@@ -250,26 +263,92 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.content}>
           {/* Title */}
-          <Text style={styles.title}>
-            {sessionId ? 'Working on...' : 'What are you working on?'}
-          </Text>
-
-          {/* Timer */}
-          {sessionId && startTime && (
-            <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+          {!sessionId && (
+            <Text style={styles.title}>What are you working on?</Text>
           )}
 
-          {/* Text Input */}
+          {/* Timer Section */}
+          {sessionId && startTime && (
+            <View style={styles.timerSection}>
+              <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+
+              {(selectedProperty || selectedBillingCategory) && (
+                <View style={styles.sessionInfo}>
+                  {selectedProperty && (
+                    <View style={styles.infoPill}>
+                      <Text style={styles.infoPillText}>{selectedProperty.label}</Text>
+                    </View>
+                  )}
+                  {selectedBillingCategory && (
+                    <View style={[styles.infoPill, styles.categoryPill]}>
+                      <Text style={styles.infoPillText}>{selectedBillingCategory.label}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Text Input - always editable */}
           <TextInput
             style={styles.input}
             placeholder="Enter task description"
             placeholderTextColor="#999"
             value={task}
             onChangeText={setTask}
-            editable={!sessionId}
             multiline
             numberOfLines={3}
           />
+
+          {/* Property Dropdown */}
+          {!sessionId && (
+            <View style={styles.pickerContainer}>
+              <Select
+                value={selectedProperty}
+                onValueChange={setSelectedProperty}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a property..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <NativeSelectScrollView>
+                    {properties.map((property) => (
+                      <SelectItem
+                        key={property.id}
+                        value={property.id}
+                        label={property.name}
+                      />
+                    ))}
+                  </NativeSelectScrollView>
+                </SelectContent>
+              </Select>
+            </View>
+          )}
+
+          {/* Billing Category Dropdown */}
+          {!sessionId && (
+            <View style={styles.pickerContainer}>
+              <Select
+                value={selectedBillingCategory}
+                onValueChange={setSelectedBillingCategory}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a category..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <NativeSelectScrollView>
+                    {billingCategories.map((category) => (
+                      <SelectItem
+                        key={category.id}
+                        value={category.id}
+                        label={category.name}
+                      />
+                    ))}
+                  </NativeSelectScrollView>
+                </SelectContent>
+              </Select>
+            </View>
+          )}
 
           {/* Start Button */}
           {!sessionId && (
@@ -340,13 +419,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.5,
   },
+  timerSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
   timer: {
-    fontSize: 48,
+    fontSize: 56,
     fontWeight: '700',
     color: '#0a0a0a',
-    marginBottom: 32,
-    letterSpacing: -1,
+    letterSpacing: -2,
     fontVariant: ['tabular-nums'],
+    marginBottom: 16,
+  },
+  sessionInfo: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  infoPill: {
+    backgroundColor: '#6b7fa3',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  categoryPill: {
+    backgroundColor: '#8b9dc3',
+  },
+  infoPillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   input: {
     width: '100%',
@@ -360,7 +465,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     color: '#0a0a0a',
     textAlignVertical: 'top',
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  pickerContainer: {
+    width: '100%',
+    maxWidth: 400,
+    marginBottom: 16,
   },
   button: {
     width: '100%',

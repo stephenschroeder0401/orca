@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import 'react-native-gesture-handler';
+import { PortalHost } from '@rn-primitives/portal';
 import LoginScreen from './screens/LoginScreen';
 import HomeScreen from './screens/HomeScreen';
 import TimeHistoryScreen from './screens/TimeHistoryScreen';
@@ -68,31 +69,31 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Drawer.Navigator
-        initialRouteName="Timer"
-        screenOptions={{
-          headerShown: false,
-          drawerPosition: 'right',
-          drawerType: 'front',
-          swipeEdgeWidth: 50,
-          drawerStyle: {
-            width: '100%',
-          },
-        }}
-      >
-        <Drawer.Screen
-          name="Timer"
-          component={HomeScreen}
-          options={{ swipeEnabled: true }}
-        />
-        <Drawer.Screen
-          name="History"
-          component={TimeHistoryScreen}
-          options={{ swipeEnabled: true }}
-        />
-      </Drawer.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer>
+        <Drawer.Navigator
+          initialRouteName="Timer"
+          drawerContent={() => <TimeHistoryScreen />}
+          screenOptions={{
+            headerShown: false,
+            drawerPosition: 'right',
+            drawerType: 'slide',
+            swipeEdgeWidth: 200,
+            swipeMinDistance: 30,
+            drawerStyle: {
+              width: '100%',
+            },
+          }}
+        >
+          <Drawer.Screen
+            name="Timer"
+            component={HomeScreen}
+            options={{ swipeEnabled: true }}
+          />
+        </Drawer.Navigator>
+      </NavigationContainer>
+      <PortalHost />
+    </>
   );
 }
 

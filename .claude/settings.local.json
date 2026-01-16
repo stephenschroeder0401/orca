@@ -32,7 +32,12 @@
       "Bash(npm cache clean:*)",
       "Bash(cat:*)",
       "Bash(killall:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(supabase stop:*)",
+      "Bash(find:*)",
+      "Bash(claude config:*)",
+      "WebFetch(domain:www.notion.so)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
