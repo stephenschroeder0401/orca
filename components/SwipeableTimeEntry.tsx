@@ -15,6 +15,8 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
+  interpolate,
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -64,6 +66,7 @@ interface SwipeableTimeEntryProps {
   properties: Property[];
   billingCategories: BillingCategory[];
   onDelete: (id: string) => void;
+  onAnimatedDelete?: (id: string) => void;
   onEdit: (id: string) => void;
   onUpdate: () => void;
   formatDate: (dateString: string) => string;
@@ -78,12 +81,15 @@ export default function SwipeableTimeEntry({
   properties,
   billingCategories,
   onDelete,
+  onAnimatedDelete,
   onUpdate,
   formatDate,
   formatTime,
   formatDuration,
 }: SwipeableTimeEntryProps) {
   const translateX = useSharedValue(0);
+  const itemHeight = useSharedValue(1); // 1 = full height, 0 = collapsed
+  const isDeleting = useSharedValue(false);
 
   // Expanded state
   const [isExpanded, setIsExpanded] = useState(false);
@@ -217,6 +223,17 @@ export default function SwipeableTimeEntry({
     onDelete(item.id);
   };
 
+  const handleAnimatedDelete = () => {
+    // Animate height collapse, then call delete callback
+    itemHeight.value = withTiming(0, { duration: 250 }, () => {
+      if (onAnimatedDelete) {
+        runOnJS(onAnimatedDelete)(item.id);
+      } else {
+        runOnJS(onDelete)(item.id);
+      }
+    });
+  };
+
   const handleExpand = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setIsExpanded(true);
@@ -280,6 +297,7 @@ export default function SwipeableTimeEntry({
     .activeOffsetX([-10, 10])
     .enabled(!isExpanded)
     .onUpdate((event) => {
+      if (isDeleting.value) return;
       if (event.translationX < 0) {
         // Allow swiping all the way left
         translateX.value = event.translationX;
@@ -288,14 +306,16 @@ export default function SwipeableTimeEntry({
       }
     })
     .onEnd((event) => {
+      if (isDeleting.value) return;
       // If swiped past threshold, delete the entry
       if (event.translationX < -SWIPE_THRESHOLD) {
-        // Animate off screen then delete
+        isDeleting.value = true;
+        // Animate off screen then collapse height
         translateX.value = withSpring(-SCREEN_WIDTH, {
           damping: 20,
           stiffness: 200,
         }, () => {
-          runOnJS(handleDelete)();
+          runOnJS(handleAnimatedDelete)();
         });
       } else {
         translateX.value = withSpring(0, {
@@ -308,6 +328,26 @@ export default function SwipeableTimeEntry({
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
+
+  // Container style for height collapse animation
+  const containerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: itemHeight.value,
+    transform: [{ scaleY: itemHeight.value }],
+    marginBottom: interpolate(itemHeight.value, [0, 1], [0, 12]),
+  }));
+
+  // Red delete indicator style - appears as you swipe left
+  const deleteIndicatorStyle = useAnimatedStyle(() => {
+    const swipeProgress = interpolate(
+      translateX.value,
+      [-SWIPE_THRESHOLD, 0],
+      [1, 0],
+      'clamp'
+    );
+    return {
+      opacity: swipeProgress * 0.6,
+    };
+  });
 
   // Expanded view - same card, just with editable fields
   if (isExpanded) {
@@ -447,7 +487,9 @@ export default function SwipeableTimeEntry({
 
   // Collapsed view - original card
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, containerAnimatedStyle]}>
+      {/* Red delete indicator behind the card */}
+      <Animated.View style={[styles.deleteIndicator, deleteIndicatorStyle]} />
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.entryCard, animatedStyle]}>
           <TouchableOpacity
@@ -493,13 +535,25 @@ export default function SwipeableTimeEntry({
           </TouchableOpacity>
         </Animated.View>
       </GestureDetector>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
+    overflow: 'hidden',
+  },
+  deleteIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#fee2e2',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#ef4444',
   },
   entryCard: {
     backgroundColor: '#fff',

@@ -174,6 +174,28 @@ export default function TimeHistoryScreen() {
     );
   }
 
+  // Animated delete - no confirmation, swipe gesture is the confirmation
+  async function handleAnimatedDelete(id: string) {
+    // Remove from local state immediately (optimistic UI)
+    setTimeEntries(prev => prev.filter(entry => entry.id !== id));
+
+    // Delete from database in background
+    try {
+      const { error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting time entry:', error);
+      Alert.alert('Error', 'Failed to delete time entry. Please refresh.');
+      // Optionally refetch to restore state
+      await fetchTimeEntries();
+    }
+  }
+
   function handleEdit(id: string) {
     // TODO: Navigate to edit screen
     Alert.alert('Edit', `Edit time entry ${id}`);
@@ -297,6 +319,7 @@ export default function TimeHistoryScreen() {
         properties={properties}
         billingCategories={billingCategories}
         onDelete={handleDelete}
+        onAnimatedDelete={handleAnimatedDelete}
         onEdit={handleEdit}
         onUpdate={fetchTimeEntries}
         formatDate={formatDate}
