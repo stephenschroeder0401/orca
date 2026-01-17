@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { supabase } from '~/lib/supabase';
+import { useWorkday } from '~/contexts/WorkdayContext';
 import {
   Select,
   SelectContent,
@@ -37,8 +38,17 @@ interface BillingCategory {
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const {
+    clockSessionId,
+    isWorkdayActive,
+    isClockSessionActive,
+    isGpsTracking,
+    startJob,
+    endJob,
+    endWorkday,
+  } = useWorkday();
+
   const [task, setTask] = useState('');
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -48,24 +58,48 @@ export default function HomeScreen() {
   const [selectedBillingCategory, setSelectedBillingCategory] = useState<Option>(undefined);
 
   const slideAnim = useState(new Animated.Value(0))[0];
+  const gpsPulseAnim = useRef(new Animated.Value(1)).current;
 
   // Fetch properties and billing categories on mount
   useEffect(() => {
     fetchProperties();
     fetchBillingCategories();
-    testOrcaQuery();
   }, []);
 
-  async function testOrcaQuery() {
-    console.log('Testing clock_sessions query...');
-    const { data, error } = await supabase
-      .schema('orca')
-      .from('clock_sessions')
-      .select('*')
-      .limit(1);
+  // GPS pulse animation
+  useEffect(() => {
+    if (isGpsTracking) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(gpsPulseAnim, {
+            toValue: 0.4,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(gpsPulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    }
+  }, [isGpsTracking, gpsPulseAnim]);
 
-    console.log('Clock sessions query result:', { data, error });
-  }
+  // Sync start time with active session
+  useEffect(() => {
+    if (isClockSessionActive && !startTime) {
+      // If we have an active session but no local start time, set it now
+      // This handles the case where app restarts mid-session
+      setStartTime(new Date());
+    } else if (!isClockSessionActive && startTime) {
+      // Session ended, clear local state
+      setStartTime(null);
+      setElapsedSeconds(0);
+    }
+  }, [isClockSessionActive, startTime]);
 
   // Timer effect
   useEffect(() => {
@@ -149,39 +183,13 @@ export default function HomeScreen() {
     if (!task.trim()) return;
 
     try {
-      // Get current user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      console.log('Auth user:', user);
-      console.log('Auth error:', authError);
-      if (!user) throw new Error('Not authenticated');
+      // Start job via context (auto-creates workday + starts GPS tracking)
+      await startJob({
+        notes: task,
+        propertyId: selectedProperty?.value,
+        billingCategoryId: selectedBillingCategory?.value,
+      });
 
-      // Get client_id from user_account
-      const { data: userAccount, error: accountError } = await supabase
-        .from('user_account')
-        .select('client_id')
-        .eq('user_id', user.id)
-        .single();
-
-      console.log('User account:', userAccount);
-      console.log('Account error:', accountError);
-      if (!userAccount?.client_id) throw new Error('No client associated with user');
-
-      const { data, error } = await supabase
-        .schema('orca')
-        .from('clock_sessions')
-        .insert({
-          user_id: user.id,
-          client_id: userAccount.client_id,
-          notes: task,
-          property_id: selectedProperty?.value || null,
-          billing_category_id: selectedBillingCategory?.value || null,
-        })
-        .select('id')
-        .single();
-
-      if (error) throw error;
-
-      setSessionId(data.id);
       setStartTime(new Date());
 
       // Animate the End Session button sliding in
@@ -193,27 +201,18 @@ export default function HomeScreen() {
       }).start();
     } catch (error: any) {
       console.error('Error starting session:', error);
-      console.error('Error details:', JSON.stringify(error, null, 2));
-      Alert.alert('Error', error.message || error.toString() || 'Failed to start session');
+      Alert.alert('Error', error.message || 'Failed to start session');
     }
   }
 
   async function handleEnd() {
-    if (!sessionId) return;
+    if (!isClockSessionActive) return;
 
     try {
-      const now = new Date().toISOString();
+      // End job via context (keeps workday + GPS tracking active)
+      await endJob();
 
-      const { error } = await supabase
-        .schema('orca')
-        .from('clock_sessions')
-        .update({ end_time: now })
-        .eq('id', sessionId);
-
-      if (error) throw error;
-
-      // Reset state
-      setSessionId(null);
+      // Reset local state
       setStartTime(null);
       setElapsedSeconds(0);
       setTask('');
@@ -227,6 +226,34 @@ export default function HomeScreen() {
       console.error('Error stopping session:', error);
       Alert.alert('Error', error.message || 'Failed to stop session');
     }
+  }
+
+  async function handleEndWorkday() {
+    Alert.alert(
+      'End Workday',
+      'This will end your workday and stop GPS tracking. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End Workday',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await endWorkday();
+              setStartTime(null);
+              setElapsedSeconds(0);
+              setTask('');
+              setSelectedProperty(undefined);
+              setSelectedBillingCategory(undefined);
+              slideAnim.setValue(0);
+            } catch (error: any) {
+              console.error('Error ending workday:', error);
+              Alert.alert('Error', error.message || 'Failed to end workday');
+            }
+          },
+        },
+      ]
+    );
   }
 
   function formatTime(seconds: number): string {
@@ -260,15 +287,31 @@ export default function HomeScreen() {
         resizeMode="contain"
       />
 
+      {/* GPS Tracking Indicator */}
+      {isWorkdayActive && (
+        <View style={styles.gpsIndicator}>
+          <Animated.View
+            style={[
+              styles.gpsDot,
+              isGpsTracking ? styles.gpsDotActive : styles.gpsDotInactive,
+              { opacity: isGpsTracking ? gpsPulseAnim : 1 },
+            ]}
+          />
+          <Text style={styles.gpsText}>
+            {isGpsTracking ? 'GPS Tracking' : 'GPS Off'}
+          </Text>
+        </View>
+      )}
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.content}>
           {/* Title */}
-          {!sessionId && (
+          {!isClockSessionActive && (
             <Text style={styles.title}>What are you working on?</Text>
           )}
 
           {/* Timer Section */}
-          {sessionId && startTime && (
+          {isClockSessionActive && startTime && (
             <View style={styles.timerSection}>
               <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
 
@@ -301,7 +344,7 @@ export default function HomeScreen() {
           />
 
           {/* Property Dropdown */}
-          {!sessionId && (
+          {!isClockSessionActive && (
             <View style={styles.pickerContainer}>
               <Select
                 value={selectedProperty}
@@ -326,7 +369,7 @@ export default function HomeScreen() {
           )}
 
           {/* Billing Category Dropdown */}
-          {!sessionId && (
+          {!isClockSessionActive && (
             <View style={styles.pickerContainer}>
               <Select
                 value={selectedBillingCategory}
@@ -351,7 +394,7 @@ export default function HomeScreen() {
           )}
 
           {/* Start Button */}
-          {!sessionId && (
+          {!isClockSessionActive && (
             <TouchableOpacity
               style={[styles.button, !task.trim() && styles.buttonDisabled]}
               onPress={handleStart}
@@ -363,7 +406,7 @@ export default function HomeScreen() {
           )}
 
           {/* End Session Button (slides in) */}
-          {sessionId && (
+          {isClockSessionActive && (
             <Animated.View
               style={[
                 styles.endButtonContainer,
@@ -381,6 +424,17 @@ export default function HomeScreen() {
                 <Text style={styles.buttonText}>End Session</Text>
               </TouchableOpacity>
             </Animated.View>
+          )}
+
+          {/* End Workday Button - shows when workday is active but no job running */}
+          {isWorkdayActive && !isClockSessionActive && (
+            <TouchableOpacity
+              style={[styles.button, styles.endWorkdayButton]}
+              onPress={handleEndWorkday}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.endWorkdayButtonText}>End Workday</Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>
@@ -401,6 +455,31 @@ const styles = StyleSheet.create({
     left: -10,
     opacity: 1,
     zIndex: 10,
+  },
+  gpsIndicator: {
+    position: 'absolute',
+    top: 55,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  gpsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  gpsDotActive: {
+    backgroundColor: '#22c55e',
+  },
+  gpsDotInactive: {
+    backgroundColor: '#9ca3af',
+  },
+  gpsText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6b7280',
   },
   scrollContent: {
     flexGrow: 1,
@@ -497,5 +576,15 @@ const styles = StyleSheet.create({
   },
   endButton: {
     borderColor: '#dc2626',
+  },
+  endWorkdayButton: {
+    marginTop: 16,
+    borderColor: '#6b7280',
+    backgroundColor: 'transparent',
+  },
+  endWorkdayButtonText: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

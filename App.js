@@ -9,6 +9,7 @@ import LoginScreen from './screens/LoginScreen';
 import HomeScreen from './screens/HomeScreen';
 import TimeHistoryScreen from './screens/TimeHistoryScreen';
 import { supabase } from './lib/supabase';
+import { WorkdayProvider } from './contexts/WorkdayContext';
 
 const Drawer = createDrawerNavigator();
 
@@ -69,7 +70,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <WorkdayProvider>
       <NavigationContainer>
         <Drawer.Navigator
           initialRouteName="Timer"
@@ -93,7 +94,7 @@ export default function App() {
         </Drawer.Navigator>
       </NavigationContainer>
       <PortalHost />
-    </>
+    </WorkdayProvider>
   );
 }
 
