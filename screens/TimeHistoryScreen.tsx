@@ -21,6 +21,7 @@ interface TimeEntry {
   end_time: string | null;
   property_id: string | null;
   billing_category_id: string | null;
+  unit_id: string | null;
   notes: string | null;
 }
 
@@ -94,9 +95,15 @@ export default function TimeHistoryScreen() {
 
       if (!userAccount?.client_id) return;
 
+      // Property is linked to entity, which has client_id
       const { data, error } = await supabase
         .from('property')
-        .select('id, name')
+        .select(`
+          id,
+          name,
+          entity!inner(client_id)
+        `)
+        .eq('entity.client_id', userAccount.client_id)
         .eq('is_deleted', false)
         .order('name');
 
@@ -196,9 +203,30 @@ export default function TimeHistoryScreen() {
     }
   }
 
-  function handleEdit(id: string) {
-    // TODO: Navigate to edit screen
-    Alert.alert('Edit', `Edit time entry ${id}`);
+  // Update a time entry
+  async function handleUpdate(id: string, updates: Partial<TimeEntry>) {
+    // Optimistic update
+    setTimeEntries(prev =>
+      prev.map(entry =>
+        entry.id === id ? { ...entry, ...updates } : entry
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating time entry:', error);
+      Alert.alert('Error', 'Failed to update time entry. Please refresh.');
+      // Refetch to restore state
+      await fetchTimeEntries();
+      throw error; // Re-throw so the component knows it failed
+    }
   }
 
   function formatDate(dateString: string): string {
@@ -318,13 +346,9 @@ export default function TimeHistoryScreen() {
         billingCategory={billingCategory}
         properties={properties}
         billingCategories={billingCategories}
-        onDelete={handleDelete}
-        onAnimatedDelete={handleAnimatedDelete}
-        onEdit={handleEdit}
-        onUpdate={fetchTimeEntries}
-        formatDate={formatDate}
+        onDelete={handleAnimatedDelete}
         formatTime={formatTime}
-        formatDuration={(startTs: string, endTs: string | null) => formatDuration(startTs, endTs)}
+        formatDuration={formatDuration}
       />
     );
   }
@@ -388,14 +412,14 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingTop: 16,
     flexGrow: 1,
   },
   dayDivider: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginBottom: 8,
+    paddingTop: 16,
+    paddingBottom: 12,
     backgroundColor: '#fafafa',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e0e0e0',
   },
   dayDividerText: {
     fontSize: 15,
