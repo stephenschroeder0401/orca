@@ -196,11 +196,6 @@ export default function TimeHistoryScreen() {
     }
   }
 
-  function handleEdit(id: string) {
-    // TODO: Navigate to edit screen
-    Alert.alert('Edit', `Edit time entry ${id}`);
-  }
-
   function formatDate(dateString: string): string {
     const date = new Date(dateString);
     const today = new Date();
@@ -316,15 +311,9 @@ export default function TimeHistoryScreen() {
         item={entry}
         property={property}
         billingCategory={billingCategory}
-        properties={properties}
-        billingCategories={billingCategories}
-        onDelete={handleDelete}
-        onAnimatedDelete={handleAnimatedDelete}
-        onEdit={handleEdit}
-        onUpdate={fetchTimeEntries}
-        formatDate={formatDate}
+        onDelete={handleAnimatedDelete}
         formatTime={formatTime}
-        formatDuration={(startTs: string, endTs: string | null) => formatDuration(startTs, endTs)}
+        formatDuration={formatDuration}
       />
     );
   }
@@ -388,14 +377,14 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingTop: 16,
     flexGrow: 1,
   },
   dayDivider: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginBottom: 8,
+    paddingTop: 16,
+    paddingBottom: 12,
     backgroundColor: '#fafafa',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e0e0e0',
   },
   dayDividerText: {
     fontSize: 15,
