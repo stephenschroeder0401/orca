@@ -18,6 +18,7 @@ import Animated, {
   withTiming,
   interpolate,
   runOnJS,
+  Extrapolation,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
@@ -342,7 +343,7 @@ export default function SwipeableTimeEntry({
       translateX.value,
       [-SWIPE_THRESHOLD, 0],
       [1, 0],
-      'clamp'
+      Extrapolation.CLAMP
     );
     return {
       opacity: swipeProgress * 0.6,

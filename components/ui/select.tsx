@@ -62,7 +62,7 @@ function SelectTrigger({
       )}
       {...props}>
       <>{children}</>
-      <Icon as={ChevronDown} aria-hidden={true} className="text-muted-foreground size-4" />
+      <Icon as={ChevronDown} className="text-muted-foreground size-4" />
     </SelectPrimitive.Trigger>
   );
 }
