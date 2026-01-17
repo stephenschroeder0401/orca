@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -55,8 +56,17 @@ export default function SwipeableTimeEntry({
   const startX = useSharedValue(0);
   const isDeleting = useSharedValue(false);
 
+  // Press state for visual feedback
+  const [isPressed, setIsPressed] = useState(false);
+
   const handleDelete = () => {
     onDelete(item.id);
+  };
+
+  const handleLongPress = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // TODO: Enter edit mode
+    console.log('Long press - would enter edit mode');
   };
 
   const confirmDelete = () => {
@@ -74,26 +84,22 @@ export default function SwipeableTimeEntry({
     .onUpdate((event) => {
       if (isDeleting.value) return;
       const newX = startX.value + event.translationX;
-      // Clamp: don't go past 0 (right edge), allow going left
       translateX.value = Math.min(0, newX);
     })
     .onEnd(() => {
       if (isDeleting.value) return;
 
       if (translateX.value < -AUTO_DELETE_THRESHOLD) {
-        // Auto-delete if swiped past 70%
         isDeleting.value = true;
         translateX.value = withTiming(-SCREEN_WIDTH, { duration: 150 }, () => {
           runOnJS(handleDelete)();
         });
       } else if (translateX.value < -DELETE_BUTTON_WIDTH / 2) {
-        // Snap to show delete button
         translateX.value = withSpring(-DELETE_BUTTON_WIDTH, {
           damping: 20,
           stiffness: 200,
         });
       } else {
-        // Snap back to closed
         translateX.value = withSpring(0, {
           damping: 20,
           stiffness: 200,
@@ -117,40 +123,47 @@ export default function SwipeableTimeEntry({
       {/* Card - slides left to reveal delete button */}
       <GestureDetector gesture={panGesture}>
         <Animated.View style={cardAnimatedStyle}>
-          <Card>
-            <CardContent className="p-3">
-              <View style={styles.header}>
-                <Text style={styles.timeRange}>
-                  {formatTime(item.start_time)} -{' '}
-                  {item.end_time ? formatTime(item.end_time) : 'In Progress'}
-                </Text>
-                <Text style={styles.duration}>
-                  {formatDuration(item.start_time, item.end_time)}
-                </Text>
-              </View>
-
-              {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
-
-              {(property || billingCategory) && (
-                <View style={styles.details}>
-                  {property && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Property</Text>
-                      <Text style={styles.detailValue}>{property.name}</Text>
-                    </View>
-                  )}
-                  {billingCategory && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Category</Text>
-                      <Text style={styles.detailValue}>
-                        {billingCategory.name}
-                      </Text>
-                    </View>
-                  )}
+          <Pressable
+            onPressIn={() => setIsPressed(true)}
+            onPressOut={() => setIsPressed(false)}
+            onLongPress={handleLongPress}
+            delayLongPress={500}
+          >
+            <Card style={isPressed && styles.cardPressed}>
+              <CardContent className="p-3" style={isPressed && styles.contentPressed}>
+                <View style={styles.header}>
+                  <Text style={[styles.timeRange, isPressed && styles.textPressed]}>
+                    {formatTime(item.start_time)} -{' '}
+                    {item.end_time ? formatTime(item.end_time) : 'In Progress'}
+                  </Text>
+                  <Text style={[styles.duration, isPressed && styles.textPressed]}>
+                    {formatDuration(item.start_time, item.end_time)}
+                  </Text>
                 </View>
-              )}
-            </CardContent>
-          </Card>
+
+                {item.notes && <Text style={[styles.notes, isPressed && styles.textPressed]}>{item.notes}</Text>}
+
+                {(property || billingCategory) && (
+                  <View style={styles.details}>
+                    {property && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Property</Text>
+                        <Text style={[styles.detailValue, isPressed && styles.textPressed]}>{property.name}</Text>
+                      </View>
+                    )}
+                    {billingCategory && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Category</Text>
+                        <Text style={[styles.detailValue, isPressed && styles.textPressed]}>
+                          {billingCategory.name}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </CardContent>
+            </Card>
+          </Pressable>
         </Animated.View>
       </GestureDetector>
     </View>
@@ -160,13 +173,23 @@ export default function SwipeableTimeEntry({
 const styles = StyleSheet.create({
   wrapper: {
     marginBottom: 8,
-    position: 'relative', // Allows absolute positioning of delete button
+    position: 'relative',
+  },
+  cardPressed: {
+    borderColor: '#d1d5db',
+    borderWidth: 2,
+  },
+  contentPressed: {
+    opacity: 0.6,
+  },
+  textPressed: {
+    color: '#6b7280',
   },
   deleteButtonContainer: {
     position: 'absolute',
     right: 0,
     top: 0,
-    bottom: 0, // Stretches to match card height
+    bottom: 0,
     width: DELETE_BUTTON_WIDTH,
     backgroundColor: '#dc2626',
     borderRadius: 12,

@@ -196,6 +196,32 @@ export default function TimeHistoryScreen() {
     }
   }
 
+  // Update a time entry
+  async function handleUpdate(id: string, updates: Partial<TimeEntry>) {
+    // Optimistic update
+    setTimeEntries(prev =>
+      prev.map(entry =>
+        entry.id === id ? { ...entry, ...updates } : entry
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating time entry:', error);
+      Alert.alert('Error', 'Failed to update time entry. Please refresh.');
+      // Refetch to restore state
+      await fetchTimeEntries();
+      throw error; // Re-throw so the component knows it failed
+    }
+  }
+
   function formatDate(dateString: string): string {
     const date = new Date(dateString);
     const today = new Date();
