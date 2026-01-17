@@ -21,6 +21,7 @@ interface TimeEntry {
   end_time: string | null;
   property_id: string | null;
   billing_category_id: string | null;
+  unit_id: string | null;
   notes: string | null;
 }
 
@@ -94,9 +95,15 @@ export default function TimeHistoryScreen() {
 
       if (!userAccount?.client_id) return;
 
+      // Property is linked to entity, which has client_id
       const { data, error } = await supabase
         .from('property')
-        .select('id, name')
+        .select(`
+          id,
+          name,
+          entity!inner(client_id)
+        `)
+        .eq('entity.client_id', userAccount.client_id)
         .eq('is_deleted', false)
         .order('name');
 
@@ -337,6 +344,8 @@ export default function TimeHistoryScreen() {
         item={entry}
         property={property}
         billingCategory={billingCategory}
+        properties={properties}
+        billingCategories={billingCategories}
         onDelete={handleAnimatedDelete}
         formatTime={formatTime}
         formatDuration={formatDuration}
