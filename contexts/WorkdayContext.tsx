@@ -26,6 +26,7 @@ interface WorkdayContextType {
     notes?: string;
     propertyId?: string;
     billingCategoryId?: string;
+    unitId?: string;
   }) => Promise<{ workdayId: string; clockSessionId: string }>;
   endJob: () => Promise<void>;
   endWorkday: () => Promise<void>;
@@ -101,6 +102,7 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     notes?: string;
     propertyId?: string;
     billingCategoryId?: string;
+    unitId?: string;
   }): Promise<{ workdayId: string; clockSessionId: string }> {
     let activeWorkdayId = workdayId;
 
@@ -133,6 +135,7 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
       p_notes: params.notes || null,
       p_property_id: params.propertyId || null,
       p_billing_category_id: params.billingCategoryId || null,
+      p_unit_id: params.unitId || null,
     });
 
     if (sessionError) {

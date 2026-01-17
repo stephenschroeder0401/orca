@@ -36,6 +36,12 @@ interface BillingCategory {
   name: string;
 }
 
+interface PropertyUnit {
+  id: string;
+  unit_name: string;
+  property_id: string;
+}
+
 export default function HomeScreen() {
   const navigation = useNavigation();
   const {
@@ -54,8 +60,10 @@ export default function HomeScreen() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [billingCategories, setBillingCategories] = useState<BillingCategory[]>([]);
+  const [units, setUnits] = useState<PropertyUnit[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Option>(undefined);
   const [selectedBillingCategory, setSelectedBillingCategory] = useState<Option>(undefined);
+  const [selectedUnit, setSelectedUnit] = useState<Option>(undefined);
 
   const slideAnim = useState(new Animated.Value(0))[0];
   const gpsPulseAnim = useRef(new Animated.Value(1)).current;
@@ -87,6 +95,33 @@ export default function HomeScreen() {
       return () => pulse.stop();
     }
   }, [isGpsTracking, gpsPulseAnim]);
+
+  // Fetch units when property changes
+  useEffect(() => {
+    async function fetchUnits() {
+      if (!selectedProperty?.value) {
+        setUnits([]);
+        setSelectedUnit(undefined);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('property_unit')
+          .select('id, unit_name, property_id')
+          .eq('property_id', selectedProperty.value)
+          .eq('is_deleted', false)
+          .order('unit_name');
+
+        if (error) throw error;
+        setUnits(data || []);
+      } catch (error) {
+        console.error('Error fetching units:', error);
+      }
+    }
+
+    fetchUnits();
+  }, [selectedProperty?.value]);
 
   // Sync start time with active session
   useEffect(() => {
@@ -188,6 +223,7 @@ export default function HomeScreen() {
         notes: task,
         propertyId: selectedProperty?.value,
         billingCategoryId: selectedBillingCategory?.value,
+        unitId: selectedUnit?.value,
       });
 
       setStartTime(new Date());
@@ -218,6 +254,8 @@ export default function HomeScreen() {
       setTask('');
       setSelectedProperty(undefined);
       setSelectedBillingCategory(undefined);
+      setSelectedUnit(undefined);
+      setUnits([]);
       slideAnim.setValue(0);
 
       // Navigate to history
@@ -315,11 +353,16 @@ export default function HomeScreen() {
             <View style={styles.timerSection}>
               <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
 
-              {(selectedProperty || selectedBillingCategory) && (
+              {(selectedProperty || selectedBillingCategory || selectedUnit) && (
                 <View style={styles.sessionInfo}>
                   {selectedProperty && (
                     <View style={styles.infoPill}>
                       <Text style={styles.infoPillText}>{selectedProperty.label}</Text>
+                    </View>
+                  )}
+                  {selectedUnit && (
+                    <View style={[styles.infoPill, styles.unitPill]}>
+                      <Text style={styles.infoPillText}>{selectedUnit.label}</Text>
                     </View>
                   )}
                   {selectedBillingCategory && (
@@ -348,7 +391,11 @@ export default function HomeScreen() {
             <View style={styles.pickerContainer}>
               <Select
                 value={selectedProperty}
-                onValueChange={setSelectedProperty}
+                onValueChange={(value) => {
+                  setSelectedProperty(value);
+                  // Clear unit when property changes
+                  setSelectedUnit(undefined);
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a property..." />
@@ -360,6 +407,31 @@ export default function HomeScreen() {
                         key={property.id}
                         value={property.id}
                         label={property.name}
+                      />
+                    ))}
+                  </NativeSelectScrollView>
+                </SelectContent>
+              </Select>
+            </View>
+          )}
+
+          {/* Unit Dropdown - only shows when property is selected and has units */}
+          {!isClockSessionActive && selectedProperty && units.length > 0 && (
+            <View style={styles.pickerContainer}>
+              <Select
+                value={selectedUnit}
+                onValueChange={setSelectedUnit}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a unit (optional)..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <NativeSelectScrollView>
+                    {units.map((unit) => (
+                      <SelectItem
+                        key={unit.id}
+                        value={unit.id}
+                        label={unit.unit_name}
                       />
                     ))}
                   </NativeSelectScrollView>
@@ -525,6 +597,9 @@ const styles = StyleSheet.create({
   },
   categoryPill: {
     backgroundColor: '#8b9dc3',
+  },
+  unitPill: {
+    backgroundColor: '#7c9a92',
   },
   infoPillText: {
     color: '#fff',
