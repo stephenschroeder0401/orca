@@ -11,8 +11,10 @@ import {
   Image,
   Alert,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Haptics from 'expo-haptics';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { supabase } from '~/lib/supabase';
 import { useWorkday } from '~/contexts/WorkdayContext';
@@ -42,9 +44,30 @@ interface PropertyUnit {
   property_id: string;
 }
 
+interface TodaySession {
+  id: string;
+  start_time: string;
+  end_time: string | null;
+  notes: string | null;
+  property_id: string | null;
+  billing_category_id: string | null;
+}
+
+type ViewState = 'setup' | 'active' | 'job_complete';
+
+const CELEBRATION_MESSAGES = [
+  'Job complete!',
+  'Well done!',
+  'Nice work!',
+  'Great job!',
+  'Finished!',
+  'All done!',
+];
+
 export default function HomeScreen() {
   const navigation = useNavigation();
   const {
+    workdayId,
     clockSessionId,
     isWorkdayActive,
     isClockSessionActive,
@@ -54,9 +77,12 @@ export default function HomeScreen() {
     endWorkday,
   } = useWorkday();
 
+  const [viewState, setViewState] = useState<ViewState>('setup');
+  const [celebrationMessage, setCelebrationMessage] = useState(CELEBRATION_MESSAGES[0]);
   const [task, setTask] = useState('');
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [billingCategories, setBillingCategories] = useState<BillingCategory[]>([]);
@@ -65,13 +91,30 @@ export default function HomeScreen() {
   const [selectedBillingCategory, setSelectedBillingCategory] = useState<Option>(undefined);
   const [selectedUnit, setSelectedUnit] = useState<Option>(undefined);
 
-  const slideAnim = useState(new Animated.Value(0))[0];
+  const [todaySessions, setTodaySessions] = useState<TodaySession[]>([]);
+
   const gpsPulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  // Determine view state based on workday context
+  useEffect(() => {
+    if (isClockSessionActive) {
+      setViewState('active');
+    } else if (viewState === 'active') {
+      // Just ended a job, show completion
+      setViewState('job_complete');
+      setCelebrationMessage(CELEBRATION_MESSAGES[Math.floor(Math.random() * CELEBRATION_MESSAGES.length)]);
+      fetchTodaySessions();
+    } else if (!isWorkdayActive) {
+      setViewState('setup');
+    }
+  }, [isClockSessionActive, isWorkdayActive]);
 
   // Fetch properties and billing categories on mount
   useEffect(() => {
     fetchProperties();
     fetchBillingCategories();
+    fetchTodaySessions();
   }, []);
 
   // GPS pulse animation
@@ -126,11 +169,8 @@ export default function HomeScreen() {
   // Sync start time with active session
   useEffect(() => {
     if (isClockSessionActive && !startTime) {
-      // If we have an active session but no local start time, set it now
-      // This handles the case where app restarts mid-session
       setStartTime(new Date());
     } else if (!isClockSessionActive && startTime) {
-      // Session ended, clear local state
       setStartTime(null);
       setElapsedSeconds(0);
     }
@@ -149,13 +189,34 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [startTime]);
 
-  async function fetchProperties() {
+  async function fetchTodaySessions() {
     try {
-      // Get current user's session
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get client_id from user_account
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .select('id, start_time, end_time, notes, property_id, billing_category_id')
+        .eq('user_id', user.id)
+        .gte('start_time', today.toISOString())
+        .order('start_time', { ascending: false });
+
+      if (error) throw error;
+      setTodaySessions(data || []);
+    } catch (error) {
+      console.error('Error fetching today sessions:', error);
+    }
+  }
+
+  async function fetchProperties() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data: userAccount } = await supabase
         .from('user_account')
         .select('client_id')
@@ -164,7 +225,6 @@ export default function HomeScreen() {
 
       if (!userAccount?.client_id) return;
 
-      // Property is linked to entity, which has client_id
       const { data, error } = await supabase
         .from('property')
         .select(`
@@ -177,7 +237,6 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
-      console.log('Fetched properties:', data);
       setProperties(data || []);
     } catch (error) {
       console.error('Error fetching properties:', error);
@@ -186,11 +245,9 @@ export default function HomeScreen() {
 
   async function fetchBillingCategories() {
     try {
-      // Get current user's session
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get client_id from user_account
       const { data: userAccount } = await supabase
         .from('user_account')
         .select('client_id')
@@ -207,18 +264,18 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
-      console.log('Fetched billing categories:', data);
       setBillingCategories(data || []);
     } catch (error) {
       console.error('Error fetching billing categories:', error);
     }
   }
 
+  const canStart = selectedProperty && selectedBillingCategory;
+
   async function handleStart() {
-    if (!task.trim()) return;
+    if (!canStart) return;
 
     try {
-      // Start job via context (auto-creates workday + starts GPS tracking)
       await startJob({
         notes: task,
         propertyId: selectedProperty?.value,
@@ -227,71 +284,122 @@ export default function HomeScreen() {
       });
 
       setStartTime(new Date());
-
-      // Animate the End Session button sliding in
-      Animated.spring(slideAnim, {
-        toValue: 1,
-        tension: 50,
-        friction: 7,
-        useNativeDriver: true,
-      }).start();
+      setViewState('active');
     } catch (error: any) {
       console.error('Error starting session:', error);
       Alert.alert('Error', error.message || 'Failed to start session');
     }
   }
 
-  async function handleEnd() {
+  async function handleEndJob() {
     if (!isClockSessionActive) return;
 
     try {
-      // End job via context (keeps workday + GPS tracking active)
-      await endJob();
+      // Fade out current view
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(async () => {
+        await endJob();
 
-      // Reset local state
-      setStartTime(null);
-      setElapsedSeconds(0);
-      setTask('');
-      setSelectedProperty(undefined);
-      setSelectedBillingCategory(undefined);
-      setSelectedUnit(undefined);
-      setUnits([]);
-      slideAnim.setValue(0);
+        // Reset local state
+        setStartTime(null);
+        setElapsedSeconds(0);
+        setIsEditingNotes(false);
 
-      // Navigate to history
-      navigation.dispatch(DrawerActions.openDrawer());
+        // Fade in job complete view
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      });
     } catch (error: any) {
       console.error('Error stopping session:', error);
       Alert.alert('Error', error.message || 'Failed to stop session');
+      fadeAnim.setValue(1);
     }
   }
 
-  async function handleEndWorkday() {
+  async function handleStartNewJob() {
+    // Reset form but keep workday active
+    setTask('');
+    setSelectedProperty(undefined);
+    setSelectedBillingCategory(undefined);
+    setSelectedUnit(undefined);
+    setUnits([]);
+    setViewState('setup');
+  }
+
+  async function handleClockOut() {
     Alert.alert(
-      'End Workday',
+      'Clock Out',
       'This will end your workday and stop GPS tracking. Are you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'End Workday',
+          text: 'Clock Out',
           style: 'destructive',
           onPress: async () => {
             try {
-              await endWorkday();
-              setStartTime(null);
-              setElapsedSeconds(0);
-              setTask('');
-              setSelectedProperty(undefined);
-              setSelectedBillingCategory(undefined);
-              slideAnim.setValue(0);
+              // Fade out
+              Animated.timing(fadeAnim, {
+                toValue: 0,
+                duration: 150,
+                useNativeDriver: true,
+              }).start(async () => {
+                await endWorkday();
+                setStartTime(null);
+                setElapsedSeconds(0);
+                setTask('');
+                setSelectedProperty(undefined);
+                setSelectedBillingCategory(undefined);
+                setSelectedUnit(undefined);
+                setViewState('setup');
+
+                // Fade in
+                Animated.timing(fadeAnim, {
+                  toValue: 1,
+                  duration: 200,
+                  useNativeDriver: true,
+                }).start();
+
+                // Navigate to history
+                navigation.dispatch(DrawerActions.openDrawer());
+              });
             } catch (error: any) {
               console.error('Error ending workday:', error);
               Alert.alert('Error', error.message || 'Failed to end workday');
+              fadeAnim.setValue(1);
             }
           },
         },
       ]
     );
+  }
+
+  async function handleNotesLongPress() {
+    if (isClockSessionActive) {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setIsEditingNotes(true);
+    }
+  }
+
+  async function handleNotesDone() {
+    setIsEditingNotes(false);
+    // Save notes to the current session
+    if (clockSessionId && task) {
+      try {
+        await supabase
+          .schema('orca')
+          .from('clock_sessions')
+          .update({ notes: task })
+          .eq('id', clockSessionId);
+      } catch (error) {
+        console.error('Error saving notes:', error);
+      }
+    }
   }
 
   function formatTime(seconds: number): string {
@@ -301,15 +409,282 @@ export default function HomeScreen() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
-  const endButtonTranslateY = slideAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [100, 0],
-  });
+  function formatSessionTime(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }
 
-  const endButtonOpacity = slideAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
+  function calculateTodayTotal(): string {
+    let totalMinutes = 0;
+    todaySessions.forEach(session => {
+      if (session.end_time) {
+        const start = new Date(session.start_time).getTime();
+        const end = new Date(session.end_time).getTime();
+        totalMinutes += Math.floor((end - start) / 1000 / 60);
+      }
+    });
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    if (hours > 0) {
+      return `${hours}h ${mins}m`;
+    }
+    return `${mins}m`;
+  }
+
+  const renderSetupView = () => (
+    <>
+      <Text style={styles.title}>What are you working on?</Text>
+
+      {/* Notes Input */}
+      <TextInput
+        style={styles.input}
+        placeholder="Enter task description (optional)"
+        placeholderTextColor="#999"
+        value={task}
+        onChangeText={setTask}
+        multiline
+        numberOfLines={3}
+      />
+
+      {/* Property Dropdown */}
+      <View style={styles.pickerContainer}>
+        <Text style={styles.requiredLabel}>Property *</Text>
+        <Select
+          value={selectedProperty}
+          onValueChange={(value) => {
+            setSelectedProperty(value);
+            setSelectedUnit(undefined);
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select a property..." />
+          </SelectTrigger>
+          <SelectContent>
+            <NativeSelectScrollView>
+              {properties.map((property) => (
+                <SelectItem
+                  key={property.id}
+                  value={property.id}
+                  label={property.name}
+                />
+              ))}
+            </NativeSelectScrollView>
+          </SelectContent>
+        </Select>
+      </View>
+
+      {/* Unit Dropdown */}
+      {selectedProperty && units.length > 0 && (
+        <View style={styles.pickerContainer}>
+          <Text style={styles.optionalLabel}>Unit (optional)</Text>
+          <Select
+            value={selectedUnit}
+            onValueChange={setSelectedUnit}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select a unit..." />
+            </SelectTrigger>
+            <SelectContent>
+              <NativeSelectScrollView>
+                {units.map((unit) => (
+                  <SelectItem
+                    key={unit.id}
+                    value={unit.id}
+                    label={unit.unit_name}
+                  />
+                ))}
+              </NativeSelectScrollView>
+            </SelectContent>
+          </Select>
+        </View>
+      )}
+
+      {/* Billing Category Dropdown */}
+      <View style={styles.pickerContainer}>
+        <Text style={styles.requiredLabel}>Category *</Text>
+        <Select
+          value={selectedBillingCategory}
+          onValueChange={setSelectedBillingCategory}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select a category..." />
+          </SelectTrigger>
+          <SelectContent>
+            <NativeSelectScrollView>
+              {billingCategories.map((category) => (
+                <SelectItem
+                  key={category.id}
+                  value={category.id}
+                  label={category.name}
+                />
+              ))}
+            </NativeSelectScrollView>
+          </SelectContent>
+        </Select>
+      </View>
+    </>
+  );
+
+  const renderActiveView = () => (
+    <>
+      {/* Timer */}
+      <View style={styles.timerSection}>
+        <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+
+        {(selectedProperty || selectedBillingCategory || selectedUnit) && (
+          <View style={styles.sessionInfo}>
+            {selectedProperty && (
+              <View style={styles.infoPill}>
+                <Text style={styles.infoPillText}>{selectedProperty.label}</Text>
+              </View>
+            )}
+            {selectedUnit && (
+              <View style={[styles.infoPill, styles.unitPill]}>
+                <Text style={styles.infoPillText}>{selectedUnit.label}</Text>
+              </View>
+            )}
+            {selectedBillingCategory && (
+              <View style={[styles.infoPill, styles.categoryPill]}>
+                <Text style={styles.infoPillText}>{selectedBillingCategory.label}</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* Notes - Long press to edit */}
+      {isEditingNotes ? (
+        <View style={styles.notesEditContainer}>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter task description"
+            placeholderTextColor="#999"
+            value={task}
+            onChangeText={setTask}
+            multiline
+            numberOfLines={3}
+            autoFocus
+          />
+          <TouchableOpacity style={styles.notesDoneButton} onPress={handleNotesDone}>
+            <Text style={styles.notesDoneText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <Pressable onLongPress={handleNotesLongPress} delayLongPress={500}>
+          <View style={styles.notesDisplay}>
+            {task ? (
+              <Text style={styles.notesText}>{task}</Text>
+            ) : (
+              <Text style={styles.notesPlaceholder}>Hold to add notes...</Text>
+            )}
+            <Text style={styles.notesHint}>Hold to edit</Text>
+          </View>
+        </Pressable>
+      )}
+    </>
+  );
+
+  const renderJobCompleteView = () => (
+    <>
+      {/* Celebration Message */}
+      <Text style={styles.celebrationTitle}>{celebrationMessage}</Text>
+
+      {/* Today's Preview */}
+      <View style={styles.todayPreview}>
+        <View style={styles.todayHeader}>
+          <Text style={styles.todayTitle}>Today</Text>
+          <Text style={styles.todayTotal}>{calculateTodayTotal()}</Text>
+        </View>
+        {todaySessions.slice(0, 3).map((session) => (
+          <View key={session.id} style={styles.todaySession}>
+            <Text style={styles.todaySessionTime}>
+              {formatSessionTime(session.start_time)}
+              {session.end_time && ` - ${formatSessionTime(session.end_time)}`}
+            </Text>
+            {session.notes && (
+              <Text style={styles.todaySessionNotes} numberOfLines={1}>
+                {session.notes}
+              </Text>
+            )}
+          </View>
+        ))}
+        {todaySessions.length > 3 && (
+          <Text style={styles.todayMore}>+{todaySessions.length - 3} more</Text>
+        )}
+        {todaySessions.length === 0 && (
+          <Text style={styles.todayEmpty}>No jobs recorded yet</Text>
+        )}
+      </View>
+    </>
+  );
+
+  const renderBottomBar = () => {
+    if (viewState === 'setup') {
+      return (
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={[styles.primaryButton, !canStart && styles.buttonDisabled]}
+            onPress={handleStart}
+            disabled={!canStart}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.primaryButtonText}>Start</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (viewState === 'active') {
+      return (
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={[styles.primaryButton, styles.endJobButton]}
+            onPress={handleEndJob}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.primaryButtonText}>End Job</Text>
+          </TouchableOpacity>
+
+          <View style={styles.clockOutDivider} />
+
+          <TouchableOpacity
+            style={styles.clockOutButton}
+            onPress={handleClockOut}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.clockOutButtonText}>Clock Out</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // job_complete view
+    return (
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={handleStartNewJob}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.primaryButtonText}>Start New Job</Text>
+        </TouchableOpacity>
+
+        <View style={styles.clockOutDivider} />
+
+        <TouchableOpacity
+          style={styles.clockOutButton}
+          onPress={handleClockOut}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.clockOutButtonText}>Clock Out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   return (
     <KeyboardAvoidingView
@@ -341,175 +716,22 @@ export default function HomeScreen() {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.content}>
-          {/* Title */}
-          {!isClockSessionActive && (
-            <Text style={styles.title}>What are you working on?</Text>
-          )}
+      {/* Main Content */}
+      <Animated.View style={[styles.mainContent, { opacity: fadeAnim }]}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.content}>
+            {viewState === 'setup' && renderSetupView()}
+            {viewState === 'active' && renderActiveView()}
+            {viewState === 'job_complete' && renderJobCompleteView()}
+          </View>
+        </ScrollView>
+      </Animated.View>
 
-          {/* Timer Section */}
-          {isClockSessionActive && startTime && (
-            <View style={styles.timerSection}>
-              <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
-
-              {(selectedProperty || selectedBillingCategory || selectedUnit) && (
-                <View style={styles.sessionInfo}>
-                  {selectedProperty && (
-                    <View style={styles.infoPill}>
-                      <Text style={styles.infoPillText}>{selectedProperty.label}</Text>
-                    </View>
-                  )}
-                  {selectedUnit && (
-                    <View style={[styles.infoPill, styles.unitPill]}>
-                      <Text style={styles.infoPillText}>{selectedUnit.label}</Text>
-                    </View>
-                  )}
-                  {selectedBillingCategory && (
-                    <View style={[styles.infoPill, styles.categoryPill]}>
-                      <Text style={styles.infoPillText}>{selectedBillingCategory.label}</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Text Input - always editable */}
-          <TextInput
-            style={styles.input}
-            placeholder="Enter task description"
-            placeholderTextColor="#999"
-            value={task}
-            onChangeText={setTask}
-            multiline
-            numberOfLines={3}
-          />
-
-          {/* Property Dropdown */}
-          {!isClockSessionActive && (
-            <View style={styles.pickerContainer}>
-              <Select
-                value={selectedProperty}
-                onValueChange={(value) => {
-                  setSelectedProperty(value);
-                  // Clear unit when property changes
-                  setSelectedUnit(undefined);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a property..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <NativeSelectScrollView>
-                    {properties.map((property) => (
-                      <SelectItem
-                        key={property.id}
-                        value={property.id}
-                        label={property.name}
-                      />
-                    ))}
-                  </NativeSelectScrollView>
-                </SelectContent>
-              </Select>
-            </View>
-          )}
-
-          {/* Unit Dropdown - only shows when property is selected and has units */}
-          {!isClockSessionActive && selectedProperty && units.length > 0 && (
-            <View style={styles.pickerContainer}>
-              <Select
-                value={selectedUnit}
-                onValueChange={setSelectedUnit}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a unit (optional)..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <NativeSelectScrollView>
-                    {units.map((unit) => (
-                      <SelectItem
-                        key={unit.id}
-                        value={unit.id}
-                        label={unit.unit_name}
-                      />
-                    ))}
-                  </NativeSelectScrollView>
-                </SelectContent>
-              </Select>
-            </View>
-          )}
-
-          {/* Billing Category Dropdown */}
-          {!isClockSessionActive && (
-            <View style={styles.pickerContainer}>
-              <Select
-                value={selectedBillingCategory}
-                onValueChange={setSelectedBillingCategory}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a category..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <NativeSelectScrollView>
-                    {billingCategories.map((category) => (
-                      <SelectItem
-                        key={category.id}
-                        value={category.id}
-                        label={category.name}
-                      />
-                    ))}
-                  </NativeSelectScrollView>
-                </SelectContent>
-              </Select>
-            </View>
-          )}
-
-          {/* Start Button */}
-          {!isClockSessionActive && (
-            <TouchableOpacity
-              style={[styles.button, !task.trim() && styles.buttonDisabled]}
-              onPress={handleStart}
-              disabled={!task.trim()}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.buttonText}>Start</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* End Session Button (slides in) */}
-          {isClockSessionActive && (
-            <Animated.View
-              style={[
-                styles.endButtonContainer,
-                {
-                  transform: [{ translateY: endButtonTranslateY }],
-                  opacity: endButtonOpacity,
-                },
-              ]}
-            >
-              <TouchableOpacity
-                style={[styles.button, styles.endButton]}
-                onPress={handleEnd}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.buttonText}>End Session</Text>
-              </TouchableOpacity>
-            </Animated.View>
-          )}
-
-          {/* End Workday Button - shows when workday is active but no job running */}
-          {isWorkdayActive && !isClockSessionActive && (
-            <TouchableOpacity
-              style={[styles.button, styles.endWorkdayButton]}
-              onPress={handleEndWorkday}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.endWorkdayButtonText}>End Workday</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </ScrollView>
+      {/* Fixed Bottom Bar */}
+      {renderBottomBar()}
     </KeyboardAvoidingView>
   );
 }
@@ -553,22 +775,54 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#6b7280',
   },
+  mainContent: {
+    flex: 1,
+    marginTop: 100,
+  },
   scrollContent: {
     flexGrow: 1,
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     padding: 32,
+    paddingBottom: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: '600',
     color: '#0a0a0a',
-    marginBottom: 16,
+    marginBottom: 24,
     textAlign: 'center',
     letterSpacing: -0.5,
+  },
+  input: {
+    width: '100%',
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 12,
+    padding: 20,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    color: '#0a0a0a',
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  pickerContainer: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  requiredLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 6,
+  },
+  optionalLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6b7280',
+    marginBottom: 6,
   },
   timerSection: {
     alignItems: 'center',
@@ -607,28 +861,113 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.2,
   },
-  input: {
+  notesEditContainer: {
     width: '100%',
-    maxWidth: 400,
-    minHeight: 100,
+  },
+  notesDisplay: {
+    width: '100%',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#e5e5e5',
     borderRadius: 12,
     padding: 20,
+    minHeight: 80,
+  },
+  notesText: {
     fontSize: 16,
-    backgroundColor: '#fff',
     color: '#0a0a0a',
-    textAlignVertical: 'top',
-    marginBottom: 16,
+    lineHeight: 24,
   },
-  pickerContainer: {
-    width: '100%',
-    maxWidth: 400,
-    marginBottom: 16,
+  notesPlaceholder: {
+    fontSize: 16,
+    color: '#9ca3af',
+    fontStyle: 'italic',
   },
-  button: {
+  notesHint: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: 12,
+    textAlign: 'right',
+  },
+  notesDoneButton: {
+    alignSelf: 'flex-end',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  notesDoneText: {
+    color: '#3b82f6',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  celebrationTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#0a0a0a',
+    textAlign: 'center',
+    marginBottom: 32,
+    letterSpacing: -0.5,
+  },
+  todayPreview: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  todayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e5e5',
+  },
+  todayTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0a0a0a',
+  },
+  todayTotal: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0a0a0a',
+  },
+  todaySession: {
+    paddingVertical: 8,
+  },
+  todaySessionTime: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  todaySessionNotes: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  todayMore: {
+    fontSize: 13,
+    color: '#3b82f6',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  todayEmpty: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+  bottomBar: {
+    paddingHorizontal: 32,
+    paddingTop: 16,
+    paddingBottom: 40,
+    backgroundColor: '#fafafa',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e5e5',
+  },
+  primaryButton: {
     width: '100%',
-    maxWidth: 400,
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#0a0a0a',
@@ -639,25 +978,26 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.3,
   },
-  buttonText: {
+  primaryButtonText: {
     color: '#0a0a0a',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.3,
   },
-  endButtonContainer: {
-    width: '100%',
-    maxWidth: 400,
-  },
-  endButton: {
+  endJobButton: {
     borderColor: '#dc2626',
   },
-  endWorkdayButton: {
-    marginTop: 16,
-    borderColor: '#6b7280',
-    backgroundColor: 'transparent',
+  clockOutDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#d1d5db',
+    marginVertical: 16,
   },
-  endWorkdayButtonText: {
+  clockOutButton: {
+    width: '100%',
+    padding: 14,
+    alignItems: 'center',
+  },
+  clockOutButtonText: {
     color: '#6b7280',
     fontSize: 14,
     fontWeight: '500',
