@@ -14,6 +14,7 @@ import {
   FlatList,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Haptics from 'expo-haptics';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { supabase } from '~/lib/supabase';
 import { useWorkday } from '~/contexts/WorkdayContext';
@@ -102,6 +103,7 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchProperties();
     fetchBillingCategories();
+    fetchTodayEntries();
   }, []);
 
   // Sync animation with session state (handles app restart with active session)
@@ -141,11 +143,8 @@ export default function HomeScreen() {
   // Sync start time with active session
   useEffect(() => {
     if (isClockSessionActive && !startTime) {
-      // If we have an active session but no local start time, set it now
-      // This handles the case where app restarts mid-session
       setStartTime(new Date());
     } else if (!isClockSessionActive && startTime) {
-      // Session ended, clear local state
       setStartTime(null);
       setElapsedSeconds(0);
     }
@@ -166,11 +165,9 @@ export default function HomeScreen() {
 
   async function fetchProperties() {
     try {
-      // Get current user's session
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get client_id from user_account
       const { data: userAccount } = await supabase
         .from('user_account')
         .select('client_id')
@@ -179,7 +176,6 @@ export default function HomeScreen() {
 
       if (!userAccount?.client_id) return;
 
-      // Property is linked to entity, which has client_id
       const { data, error } = await supabase
         .from('property')
         .select(`
@@ -192,7 +188,6 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
-      console.log('Fetched properties:', data);
       setProperties(data || []);
     } catch (error) {
       console.error('Error fetching properties:', error);
@@ -201,11 +196,9 @@ export default function HomeScreen() {
 
   async function fetchBillingCategories() {
     try {
-      // Get current user's session
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get client_id from user_account
       const { data: userAccount } = await supabase
         .from('user_account')
         .select('client_id')
@@ -222,7 +215,6 @@ export default function HomeScreen() {
         .order('name');
 
       if (error) throw error;
-      console.log('Fetched billing categories:', data);
       setBillingCategories(data || []);
     } catch (error) {
       console.error('Error fetching billing categories:', error);
@@ -422,6 +414,7 @@ export default function HomeScreen() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
+  // Animation interpolations
   const endButtonTranslateY = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [100, 0],
@@ -923,17 +916,6 @@ const styles = StyleSheet.create({
   contentCentered: {
     justifyContent: 'center',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#0a0a0a',
-    marginBottom: 12,
-    textAlign: 'center',
-    letterSpacing: -0.5,
-  },
-  titleSpaced: {
-    marginBottom: 24,
-  },
   timerSection: {
     alignItems: 'center',
     marginBottom: 24,
@@ -980,6 +962,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.2,
   },
+  title: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#0a0a0a',
+    marginBottom: 12,
+    textAlign: 'center',
+    letterSpacing: -0.5,
+  },
+  titleSpaced: {
+    marginBottom: 24,
+  },
   input: {
     width: '100%',
     maxWidth: 400,
@@ -989,7 +982,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
-    backgroundColor: '#fff',
     color: '#0a0a0a',
     textAlignVertical: 'top',
     marginBottom: 12,
@@ -1021,6 +1013,7 @@ const styles = StyleSheet.create({
   endButtonContainer: {
     width: '100%',
     maxWidth: 400,
+    alignItems: 'center',
   },
   endButton: {
     borderColor: '#dc2626',
@@ -1038,11 +1031,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#e5e5e5',
     marginVertical: 16,
-  },
-  choiceContainer: {
-    width: '100%',
-    maxWidth: 400,
-    gap: 16,
   },
   choiceButton: {
     width: '100%',
