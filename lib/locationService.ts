@@ -6,6 +6,7 @@ import { supabase } from './supabase';
 const LOCATION_TASK_NAME = 'orca-background-location';
 const ACTIVE_WORKDAY_KEY = 'orca_active_workday_id';
 const ACTIVE_SESSION_KEY = 'orca_active_clock_session_id';
+const ACTIVE_CLOCK_PERIOD_KEY = 'orca_active_clock_period_id';
 
 // Storage helpers for active IDs
 export async function setActiveWorkdayId(id: string | null): Promise<void> {
@@ -30,6 +31,18 @@ export async function setActiveClockSessionId(id: string | null): Promise<void> 
 
 export async function getActiveClockSessionId(): Promise<string | null> {
   return AsyncStorage.getItem(ACTIVE_SESSION_KEY);
+}
+
+export async function setActiveClockPeriodId(id: string | null): Promise<void> {
+  if (id) {
+    await AsyncStorage.setItem(ACTIVE_CLOCK_PERIOD_KEY, id);
+  } else {
+    await AsyncStorage.removeItem(ACTIVE_CLOCK_PERIOD_KEY);
+  }
+}
+
+export async function getActiveClockPeriodId(): Promise<string | null> {
+  return AsyncStorage.getItem(ACTIVE_CLOCK_PERIOD_KEY);
 }
 
 // Save location points to Supabase

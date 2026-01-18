@@ -5,8 +5,10 @@ import {
   stopLocationTracking,
   setActiveWorkdayId,
   setActiveClockSessionId,
+  setActiveClockPeriodId,
   getActiveWorkdayId,
   getActiveClockSessionId,
+  getActiveClockPeriodId,
   requestLocationPermissions,
   checkLocationPermissions,
   isTrackingActive,
@@ -15,13 +17,19 @@ import {
 interface WorkdayContextType {
   // State
   workdayId: string | null;
+  clockPeriodId: string | null;
   clockSessionId: string | null;
+  workdayStartTime: Date | null;
+  clockPeriodStartTime: Date | null;
   isWorkdayActive: boolean;
+  isClockedIn: boolean;
   isClockSessionActive: boolean;
   isGpsTracking: boolean;
   hasLocationPermission: boolean;
 
   // Actions
+  clockIn: (notes?: string) => Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean }>;
+  clockOut: () => Promise<void>;
   startJob: (params: {
     notes?: string;
     propertyId?: string;
@@ -41,7 +49,10 @@ interface WorkdayProviderProps {
 
 export function WorkdayProvider({ children }: WorkdayProviderProps) {
   const [workdayId, setWorkdayId] = useState<string | null>(null);
+  const [clockPeriodId, setClockPeriodId] = useState<string | null>(null);
   const [clockSessionId, setClockSessionId] = useState<string | null>(null);
+  const [workdayStartTime, setWorkdayStartTime] = useState<Date | null>(null);
+  const [clockPeriodStartTime, setClockPeriodStartTime] = useState<Date | null>(null);
   const [isGpsTracking, setIsGpsTracking] = useState(false);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
 
@@ -54,6 +65,7 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     try {
       // Check stored IDs
       const storedWorkdayId = await getActiveWorkdayId();
+      const storedPeriodId = await getActiveClockPeriodId();
       const storedSessionId = await getActiveClockSessionId();
 
       // Verify workday is still active on server
@@ -61,11 +73,32 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
         const { data, error } = await supabase.schema('orca').rpc('get_active_workday');
         if (!error && data && data.length > 0) {
           setWorkdayId(data[0].id);
+          setWorkdayStartTime(new Date(data[0].start_time));
           await setActiveWorkdayId(data[0].id);
         } else {
           // Workday no longer active, clear stored ID
           setWorkdayId(null);
+          setWorkdayStartTime(null);
           await setActiveWorkdayId(null);
+        }
+      }
+
+      // Check if there's an active clock period
+      if (storedPeriodId) {
+        const { data, error } = await supabase.schema('orca').rpc('get_active_clock_period');
+        if (!error && data && data.length > 0) {
+          setClockPeriodId(data[0].id);
+          setClockPeriodStartTime(new Date(data[0].start_time));
+          await setActiveClockPeriodId(data[0].id);
+          // Also ensure workday is set from the period
+          if (!workdayId && data[0].workday_id) {
+            setWorkdayId(data[0].workday_id);
+            await setActiveWorkdayId(data[0].workday_id);
+          }
+        } else {
+          setClockPeriodId(null);
+          setClockPeriodStartTime(null);
+          await setActiveClockPeriodId(null);
         }
       }
 
@@ -98,6 +131,69 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     }
   }
 
+  async function clockIn(notes?: string): Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean }> {
+    // Call the clock_in RPC
+    const { data, error } = await supabase.schema('orca').rpc('clock_in', {
+      p_notes: notes || null,
+    });
+
+    if (error) {
+      console.error('[WorkdayContext] Error clocking in:', error);
+      throw error;
+    }
+
+    const { workday_id, clock_period_id, was_reopened } = data;
+
+    setWorkdayId(workday_id);
+    setClockPeriodId(clock_period_id);
+    setWorkdayStartTime(new Date());
+    setClockPeriodStartTime(new Date());
+    await setActiveWorkdayId(workday_id);
+    await setActiveClockPeriodId(clock_period_id);
+
+    // Try to start GPS tracking when clocking in
+    const permissions = await requestLocationPermissions();
+    setHasLocationPermission(permissions.foreground);
+
+    if (permissions.foreground) {
+      const trackingStarted = await startLocationTracking();
+      setIsGpsTracking(trackingStarted);
+    }
+
+    return {
+      workdayId: workday_id,
+      clockPeriodId: clock_period_id,
+      wasReopened: was_reopened || false,
+    };
+  }
+
+  async function clockOut(): Promise<void> {
+    if (!clockPeriodId) {
+      console.log('[WorkdayContext] No active clock period to end');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.schema('orca').rpc('clock_out');
+
+      if (error) throw error;
+
+      // Stop GPS tracking when clocking out
+      await stopLocationTracking();
+      setIsGpsTracking(false);
+
+      // Clear clock period state (but keep workday - user can clock back in)
+      setClockPeriodId(null);
+      setClockSessionId(null);
+      setClockPeriodStartTime(null);
+      await setActiveClockPeriodId(null);
+      await setActiveClockSessionId(null);
+    } catch (error) {
+      console.error('[WorkdayContext] Error clocking out:', error);
+      throw error;
+    }
+  }
+
   async function startJob(params: {
     notes?: string;
     propertyId?: string;
@@ -105,28 +201,13 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     unitId?: string;
   }): Promise<{ workdayId: string; clockSessionId: string }> {
     let activeWorkdayId = workdayId;
+    let activeClockPeriodId = clockPeriodId;
 
-    // Start or get workday if we don't have one
-    if (!activeWorkdayId) {
-      const { data: workdayData, error: workdayError } = await supabase.schema('orca').rpc('start_workday');
-
-      if (workdayError) {
-        console.error('[WorkdayContext] Error starting workday:', workdayError);
-        throw workdayError;
-      }
-
-      activeWorkdayId = workdayData;
-      setWorkdayId(activeWorkdayId);
-      await setActiveWorkdayId(activeWorkdayId);
-
-      // Try to start GPS tracking when workday starts
-      const permissions = await requestLocationPermissions();
-      setHasLocationPermission(permissions.foreground);
-
-      if (permissions.foreground) {
-        const trackingStarted = await startLocationTracking();
-        setIsGpsTracking(trackingStarted);
-      }
+    // Clock in if not already clocked in
+    if (!activeClockPeriodId) {
+      const result = await clockIn();
+      activeWorkdayId = result.workdayId;
+      activeClockPeriodId = result.clockPeriodId;
     }
 
     // Start clock session
@@ -186,7 +267,7 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     }
 
     try {
-      // This will also close any open clock sessions
+      // This will also close any open clock periods and sessions
       const { error } = await supabase.schema('orca').rpc('end_workday', {
         p_workday_id: workdayId,
       });
@@ -197,10 +278,14 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
       await stopLocationTracking();
       setIsGpsTracking(false);
 
-      // Clear state
+      // Clear all state
       setWorkdayId(null);
+      setClockPeriodId(null);
       setClockSessionId(null);
+      setWorkdayStartTime(null);
+      setClockPeriodStartTime(null);
       await setActiveWorkdayId(null);
+      await setActiveClockPeriodId(null);
       await setActiveClockSessionId(null);
     } catch (error) {
       console.error('[WorkdayContext] Error ending workday:', error);
@@ -212,11 +297,17 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     <WorkdayContext.Provider
       value={{
         workdayId,
+        clockPeriodId,
         clockSessionId,
+        workdayStartTime,
+        clockPeriodStartTime,
         isWorkdayActive: !!workdayId,
+        isClockedIn: !!clockPeriodId,
         isClockSessionActive: !!clockSessionId,
         isGpsTracking,
         hasLocationPermission,
+        clockIn,
+        clockOut,
         startJob,
         endJob,
         endWorkday,

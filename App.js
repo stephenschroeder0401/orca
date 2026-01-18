@@ -10,6 +10,7 @@ import HomeScreen from './screens/HomeScreen';
 import TimeHistoryScreen from './screens/TimeHistoryScreen';
 import { supabase } from './lib/supabase';
 import { WorkdayProvider } from './contexts/WorkdayContext';
+import { ClockTimer } from './components/ClockTimer';
 
 const Drawer = createDrawerNavigator();
 
@@ -71,34 +72,40 @@ export default function App() {
 
   return (
     <WorkdayProvider>
-      <NavigationContainer>
-        <Drawer.Navigator
-          initialRouteName="Timer"
-          drawerContent={() => <TimeHistoryScreen />}
-          screenOptions={{
-            headerShown: false,
-            drawerPosition: 'right',
-            drawerType: 'slide',
-            swipeEdgeWidth: 200,
-            swipeMinDistance: 30,
-            drawerStyle: {
-              width: '100%',
-            },
-          }}
-        >
-          <Drawer.Screen
-            name="Timer"
-            component={HomeScreen}
-            options={{ swipeEnabled: true }}
-          />
-        </Drawer.Navigator>
-      </NavigationContainer>
-      <PortalHost />
+      <View style={styles.appContainer}>
+        <NavigationContainer>
+          <Drawer.Navigator
+            initialRouteName="Timer"
+            drawerContent={() => <TimeHistoryScreen />}
+            screenOptions={{
+              headerShown: false,
+              drawerPosition: 'right',
+              drawerType: 'slide',
+              swipeEdgeWidth: 200,
+              swipeMinDistance: 30,
+              drawerStyle: {
+                width: '100%',
+              },
+            }}
+          >
+            <Drawer.Screen
+              name="Timer"
+              component={HomeScreen}
+              options={{ swipeEnabled: true }}
+            />
+          </Drawer.Navigator>
+        </NavigationContainer>
+        <ClockTimer />
+        <PortalHost />
+      </View>
     </WorkdayProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  appContainer: {
+    flex: 1,
+  },
   loading: {
     flex: 1,
     justifyContent: 'center',
