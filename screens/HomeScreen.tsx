@@ -113,7 +113,7 @@ export default function HomeScreen() {
   const entriesSlideAnim = useRef(new Animated.Value(300)).current;
 
   // Animation for unit dropdown slide-in
-  const unitSlideAnim = useRef(new Animated.Value(100)).current;
+  const unitSlideAnim = useRef(new Animated.Value(0)).current;
 
   // Voice recording state and animation
   const [isRecording, setIsRecording] = useState(false);
@@ -121,6 +121,26 @@ export default function HomeScreen() {
   const pulseAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
   const taskBeforeRecording = useRef('');
   const [isRecordButtonPressed, setIsRecordButtonPressed] = useState(false);
+
+  // Title slide animation
+  const titleSlideAnim = useRef(new Animated.Value(0)).current;
+  const prevIsClockedIn = useRef(isClockedIn);
+
+  // Animate title sliding when clock in state changes
+  useEffect(() => {
+    if (prevIsClockedIn.current !== isClockedIn) {
+      // Slide in from right (positive value) when clocking in, from left (negative) when clocking out
+      const direction = isClockedIn ? 1 : -1;
+      titleSlideAnim.setValue(150 * direction);
+      Animated.spring(titleSlideAnim, {
+        toValue: 0,
+        tension: 80,
+        friction: 10,
+        useNativeDriver: true,
+      }).start();
+      prevIsClockedIn.current = isClockedIn;
+    }
+  }, [isClockedIn]);
 
   // Animate entries sliding in when showing post session or clock out confirmation
   useEffect(() => {
@@ -631,11 +651,12 @@ export default function HomeScreen() {
     return (
       <>
         {/* Property & Unit Dropdowns Row */}
-        <View style={styles.propertyUnitRow}>
-          <View style={[
-            styles.pickerContainer,
-            selectedProperty && units.length > 0 ? styles.pickerHalf : null
-          ]}>
+        <View style={styles.propertyUnitRow} key={units.length > 0 ? 'with-units' : 'no-units'}>
+          <View style={
+            selectedProperty && units.length > 0
+              ? styles.pickerProperty
+              : styles.pickerContainer
+          }>
             <Select
               value={selectedProperty}
               onValueChange={(value) => {
@@ -664,8 +685,7 @@ export default function HomeScreen() {
           {selectedProperty && units.length > 0 && (
             <Animated.View
               style={[
-                styles.pickerContainer,
-                styles.pickerHalf,
+                styles.pickerUnit,
                 { transform: [{ translateX: unitSlideAnim }] }
               ]}
             >
@@ -761,10 +781,12 @@ export default function HomeScreen() {
         {/* Main Content */}
         <View style={styles.mainContent}>
           {/* Title */}
-          <Text style={[styles.title, !isClockedIn && styles.titleWithDivider]}>
-            {isClockedIn ? 'What are you working on?' : 'Clock in to start'}
-          </Text>
-          {!isClockedIn && <View style={styles.titleDivider} />}
+          <Animated.View style={{ transform: [{ translateX: titleSlideAnim }] }}>
+            <Text style={[styles.title, styles.titleWithDivider]}>
+              {isClockedIn ? 'What are you working on?' : 'Clock in to start'}
+            </Text>
+          </Animated.View>
+          <View style={styles.titleDivider} />
 
           {renderTaskForm()}
         </View>
@@ -1172,7 +1194,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
     color: '#0a0a0a',
-    marginBottom: 12,
+    marginBottom: 20,
     textAlign: 'center',
     letterSpacing: -0.5,
   },
@@ -1204,11 +1226,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
-  pickerHalf: {
+  pickerProperty: {
+    flex: 3,
+    minWidth: 0,
+  },
+  pickerUnit: {
     flex: 1,
-    width: undefined,
-    maxWidth: undefined,
-    marginBottom: 0,
+    minWidth: 100,
   },
   button: {
     width: '100%',
