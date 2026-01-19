@@ -114,6 +114,7 @@ export default function HomeScreen() {
 
   // Animation for unit dropdown slide-in
   const unitSlideAnim = useRef(new Animated.Value(0)).current;
+  const prevShowingUnits = useRef(false);
 
   // Voice recording state and animation
   const [isRecording, setIsRecording] = useState(false);
@@ -157,7 +158,10 @@ export default function HomeScreen() {
 
   // Animate unit dropdown sliding in from right when units become available
   useEffect(() => {
-    if (selectedProperty && units.length > 0) {
+    const showingUnits = !!(selectedProperty && units.length > 0);
+
+    // Only animate when transitioning from NOT showing to showing
+    if (showingUnits && !prevShowingUnits.current) {
       unitSlideAnim.setValue(100);
       Animated.spring(unitSlideAnim, {
         toValue: 0,
@@ -166,6 +170,8 @@ export default function HomeScreen() {
         useNativeDriver: true,
       }).start();
     }
+
+    prevShowingUnits.current = showingUnits;
   }, [selectedProperty?.value, units.length]);
 
   // Pulsing animation for record button
