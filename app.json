@@ -18,7 +18,9 @@
         "UIBackgroundModes": ["location"],
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Orca needs location access to track your work routes and calculate mileage.",
         "NSLocationAlwaysUsageDescription": "Orca needs background location to track routes while you work.",
-        "NSLocationWhenInUseUsageDescription": "Orca needs location to track your current work location."
+        "NSLocationWhenInUseUsageDescription": "Orca needs location to track your current work location.",
+        "NSMicrophoneUsageDescription": "Orca needs microphone access to transcribe voice notes.",
+        "NSSpeechRecognitionUsageDescription": "Orca uses speech recognition to convert your voice to text notes."
       }
     },
     "android": {
@@ -33,7 +35,8 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION"
+        "FOREGROUND_SERVICE_LOCATION",
+        "RECORD_AUDIO"
       ]
     },
     "web": {
@@ -49,6 +52,13 @@
           "locationWhenInUsePermission": "Orca needs location to track your current work location.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Orca needs microphone access to transcribe voice notes.",
+          "speechRecognitionPermission": "Orca uses speech recognition to convert your voice to text notes."
         }
       ]
     ]
