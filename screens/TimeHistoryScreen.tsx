@@ -35,10 +35,17 @@ interface BillingCategory {
   name: string;
 }
 
+interface PropertyUnit {
+  id: string;
+  unit_name: string;
+  property_id: string;
+}
+
 export default function TimeHistoryScreen() {
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [billingCategories, setBillingCategories] = useState<BillingCategory[]>([]);
+  const [units, setUnits] = useState<PropertyUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -58,6 +65,7 @@ export default function TimeHistoryScreen() {
       fetchTimeEntries(),
       fetchProperties(),
       fetchBillingCategories(),
+      fetchUnits(),
     ]);
     setLoading(false);
   }
@@ -138,6 +146,39 @@ export default function TimeHistoryScreen() {
       setBillingCategories(data || []);
     } catch (error) {
       console.error('Error fetching billing categories:', error);
+    }
+  }
+
+  async function fetchUnits() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: userAccount } = await supabase
+        .from('user_account')
+        .select('client_id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!userAccount?.client_id) return;
+
+      // Get all units for properties belonging to this client
+      const { data, error } = await supabase
+        .from('property_unit')
+        .select(`
+          id,
+          unit_name,
+          property_id,
+          property!inner(entity!inner(client_id))
+        `)
+        .eq('property.entity.client_id', userAccount.client_id)
+        .eq('is_deleted', false)
+        .order('unit_name');
+
+      if (error) throw error;
+      setUnits(data || []);
+    } catch (error) {
+      console.error('Error fetching units:', error);
     }
   }
 
@@ -338,15 +379,18 @@ export default function TimeHistoryScreen() {
     const entry = item.data;
     const property = properties.find(p => p.id === entry.property_id);
     const billingCategory = billingCategories.find(b => b.id === entry.billing_category_id);
+    const unit = units.find(u => u.id === entry.unit_id);
 
     return (
       <SwipeableTimeEntry
         item={entry}
         property={property}
         billingCategory={billingCategory}
+        unit={unit}
         properties={properties}
         billingCategories={billingCategories}
         onDelete={handleAnimatedDelete}
+        onUpdate={handleUpdate}
         formatTime={formatTime}
         formatDuration={formatDuration}
       />

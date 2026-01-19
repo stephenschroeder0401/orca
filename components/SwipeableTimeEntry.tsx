@@ -57,9 +57,11 @@ interface SwipeableTimeEntryProps {
   item: TimeEntry;
   property?: Property;
   billingCategory?: BillingCategory;
+  unit?: PropertyUnit;
   properties?: Property[];
   billingCategories?: BillingCategory[];
   onDelete: (id: string) => void;
+  onUpdate?: (id: string, updates: Partial<TimeEntry>) => Promise<void>;
   formatTime: (dateString: string) => string;
   formatDuration: (startTs: string, endTs: string | null) => string;
 }
@@ -68,9 +70,11 @@ export default function SwipeableTimeEntry({
   item,
   property,
   billingCategory,
+  unit,
   properties = [],
   billingCategories = [],
   onDelete,
+  onUpdate,
   formatTime,
   formatDuration,
 }: SwipeableTimeEntryProps) {
@@ -83,6 +87,7 @@ export default function SwipeableTimeEntry({
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingField, setEditingField] = useState<'start' | 'end' | null>(null);
   const [editedStartTime, setEditedStartTime] = useState(new Date(item.start_time));
   const [editedEndTime, setEditedEndTime] = useState(
@@ -164,6 +169,64 @@ export default function SwipeableTimeEntry({
 
   const handleDoneEditingTime = () => {
     setEditingField(null);
+  };
+
+  const handleSaveChanges = async () => {
+    if (!onUpdate) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+
+    // Build the updates object with only changed values
+    const updates: Partial<TimeEntry> = {};
+
+    // Check if times changed
+    if (editedStartTime.toISOString() !== item.start_time) {
+      updates.start_time = editedStartTime.toISOString();
+    }
+    if (editedEndTime?.toISOString() !== item.end_time) {
+      updates.end_time = editedEndTime?.toISOString() || null;
+    }
+
+    // Check if notes changed
+    if (editedNotes !== (item.notes || '')) {
+      updates.notes = editedNotes || null;
+    }
+
+    // Check if property changed
+    const newPropertyId = selectedProperty?.value || null;
+    if (newPropertyId !== item.property_id) {
+      updates.property_id = newPropertyId;
+    }
+
+    // Check if unit changed
+    const newUnitId = selectedUnit?.value || null;
+    if (newUnitId !== item.unit_id) {
+      updates.unit_id = newUnitId;
+    }
+
+    // Check if category changed
+    const newCategoryId = selectedCategory?.value || null;
+    if (newCategoryId !== item.billing_category_id) {
+      updates.billing_category_id = newCategoryId;
+    }
+
+    // Only update if there are changes
+    if (Object.keys(updates).length > 0) {
+      try {
+        await onUpdate(item.id, updates);
+        setIsEditing(false);
+      } catch (error) {
+        console.error('Error saving changes:', error);
+        // Keep editing mode open so user can retry
+      }
+    } else {
+      setIsEditing(false);
+    }
+
+    setIsSaving(false);
   };
 
   const formatEditTime = (date: Date) => {
@@ -405,16 +468,19 @@ export default function SwipeableTimeEntry({
                       </View>
                     )}
 
-                    {/* Exit edit mode */}
+                    {/* Exit edit mode / Save changes */}
                     {!editingField && (
                       <Pressable
                         onPress={async () => {
                           await Haptics.selectionAsync();
-                          setIsEditing(false);
+                          await handleSaveChanges();
                         }}
-                        style={styles.exitEditButton}
+                        style={[styles.exitEditButton, isSaving && styles.exitEditButtonDisabled]}
+                        disabled={isSaving}
                       >
-                        <Text style={styles.exitEditText}>Done Editing</Text>
+                        <Text style={styles.exitEditText}>
+                          {isSaving ? 'Saving...' : 'Done Editing'}
+                        </Text>
                       </Pressable>
                     )}
                   </View>
@@ -433,12 +499,18 @@ export default function SwipeableTimeEntry({
 
                     {item.notes && <Text style={[styles.notes, isPressed && styles.textPressed]}>{item.notes}</Text>}
 
-                    {(property || billingCategory) && (
+                    {(property || unit || billingCategory) && (
                       <View style={styles.details}>
                         {property && (
                           <View style={styles.detailRow}>
                             <Text style={styles.detailLabel}>Property</Text>
                             <Text style={[styles.detailValue, isPressed && styles.textPressed]}>{property.name}</Text>
+                          </View>
+                        )}
+                        {unit && (
+                          <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Unit</Text>
+                            <Text style={[styles.detailValue, isPressed && styles.textPressed]}>{unit.unit_name}</Text>
                           </View>
                         )}
                         {billingCategory && (
@@ -603,6 +675,9 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingVertical: 10,
     alignItems: 'center',
+  },
+  exitEditButtonDisabled: {
+    opacity: 0.5,
   },
   exitEditText: {
     color: '#3b82f6',
