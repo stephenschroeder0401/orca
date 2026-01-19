@@ -557,7 +557,8 @@ export default function HomeScreen() {
 
   async function handleClockOut() {
     try {
-      await clockOut();
+      // Show the clock out confirmation screen immediately
+      setViewState('clock_out_confirmation');
 
       // Pick a random motivating message
       const randomMessage = MOTIVATING_MESSAGES[Math.floor(Math.random() * MOTIVATING_MESSAGES.length)];
@@ -575,8 +576,8 @@ export default function HomeScreen() {
       // Fetch today's entries and calculate totals
       await fetchTodayEntries(true);
 
-      // Show the clock out confirmation screen
-      setViewState('clock_out_confirmation');
+      // Clock out after UI has transitioned
+      await clockOut();
     } catch (error: any) {
       console.error('Error clocking out:', error);
       Alert.alert('Error', error.message || 'Failed to clock out');
