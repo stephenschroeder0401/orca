@@ -11,7 +11,13 @@ import {
   Keyboard,
   ActivityIndicator,
   Animated,
+  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
+
+// Base dimensions (iPhone 11 Pro / iPhone X)
+const BASE_WIDTH = 375;
+const BASE_HEIGHT = 812;
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { ChevronRight, Mic } from 'lucide-react-native';
@@ -80,6 +86,22 @@ const MOTIVATING_MESSAGES = [
   "Boom! Done.",
   "Keep up the great work!",
 ];
+
+// Responsive scaling utilities
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const widthScale = SCREEN_WIDTH / BASE_WIDTH;
+const heightScale = SCREEN_HEIGHT / BASE_HEIGHT;
+
+// Scale based on width (for horizontal spacing, font sizes)
+const scale = (size: number) => Math.round(size * widthScale);
+// Scale based on height (for vertical spacing)
+const verticalScale = (size: number) => Math.round(size * heightScale);
+// Moderate scale - less aggressive, good for fonts
+const moderateScale = (size: number, factor = 0.5) =>
+  Math.round(size + (scale(size) - size) * factor);
+
+// Check if screen is small (< 700px height, like iPhone SE or small emulators)
+const isSmallScreen = SCREEN_HEIGHT < 700;
 
 export default function HomeScreen() {
   const {
@@ -770,7 +792,7 @@ export default function HomeScreen() {
               onPress={handleRecordPress}
               activeOpacity={1}
             >
-              <Mic size={28} color={isRecording ? '#994444' : '#b45555'} />
+              <Mic size={isSmallScreen ? 22 : 28} color={isRecording ? '#994444' : '#b45555'} />
             </TouchableOpacity>
           </Animated.View>
           {isRecording && (
@@ -894,7 +916,7 @@ export default function HomeScreen() {
                 onPress={handleRecordPress}
                 activeOpacity={1}
               >
-                <Mic size={28} color={isRecording ? '#994444' : '#b45555'} />
+                <Mic size={isSmallScreen ? 22 : 28} color={isRecording ? '#994444' : '#b45555'} />
               </TouchableOpacity>
             </Animated.View>
             {isRecording && (
@@ -1075,7 +1097,7 @@ export default function HomeScreen() {
       {viewState !== 'clock_out_confirmation' && (
         <View style={styles.swipeIndicator}>
           <Text style={styles.swipeIndicatorText}>History</Text>
-          <ChevronRight size={14} color="#c4c4c4" />
+          <ChevronRight size={moderateScale(isSmallScreen ? 12 : 14)} color="#c4c4c4" />
         </View>
       )}
     </View>
@@ -1089,14 +1111,14 @@ const styles = StyleSheet.create({
   },
   swipeIndicator: {
     position: 'absolute',
-    right: 16,
-    top: 100,
+    right: scale(16),
+    top: verticalScale(100),
     flexDirection: 'row',
     alignItems: 'center',
     opacity: 0.6,
   },
   swipeIndicatorText: {
-    fontSize: 10,
+    fontSize: moderateScale(10),
     color: '#c4c4c4',
     fontWeight: '500',
     letterSpacing: 0.3,
@@ -1105,85 +1127,85 @@ const styles = StyleSheet.create({
   fullHeightContainer: {
     flex: 1,
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
   },
   mainContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: '20%',
+    paddingBottom: isSmallScreen ? '10%' : '20%',
   },
   postSessionMainContent: {
     flex: 1,
     alignItems: 'center',
-    paddingTop: 20,
+    paddingTop: verticalScale(20),
   },
   bottomButtonContainer: {
     width: '100%',
-    paddingBottom: 20,
+    paddingBottom: verticalScale(20),
   },
   bottomDivider: {
     width: '100%',
     height: 1,
     backgroundColor: '#e5e5e5',
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   clockOutButtonSpaced: {
-    marginTop: 12,
+    marginTop: verticalScale(12),
   },
   logo: {
-    width: 120,
-    height: 44,
+    width: scale(120),
+    height: verticalScale(44),
     position: 'absolute',
-    top: 50,
-    left: -10,
+    top: verticalScale(50),
+    left: scale(-10),
     opacity: 1,
     zIndex: 10,
   },
   content: {
     flex: 1,
     alignItems: 'center',
-    padding: 32,
-    paddingTop: 100,
+    padding: scale(isSmallScreen ? 20 : 32),
+    paddingTop: verticalScale(isSmallScreen ? 80 : 100),
   },
   timerSection: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: verticalScale(24),
   },
   timer: {
-    fontSize: 56,
+    fontSize: moderateScale(isSmallScreen ? 44 : 56),
     fontWeight: '700',
     color: '#0a0a0a',
     letterSpacing: -2,
     fontVariant: ['tabular-nums'],
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   sessionInfo: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: scale(8),
+    marginBottom: verticalScale(12),
   },
   activeNotesInput: {
     width: '100%',
-    maxWidth: 400,
-    minHeight: 100,
+    maxWidth: scale(400),
+    minHeight: verticalScale(isSmallScreen ? 70 : 100),
     borderWidth: 1,
     borderColor: '#e5e5e5',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
+    borderRadius: scale(12),
+    padding: scale(isSmallScreen ? 12 : 16),
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     color: '#0a0a0a',
     textAlignVertical: 'top',
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
     backgroundColor: '#fff',
   },
   infoPill: {
     backgroundColor: '#6b7fa3',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(5),
+    borderRadius: scale(20),
   },
   categoryPill: {
     backgroundColor: '#8b9dc3',
@@ -1193,45 +1215,45 @@ const styles = StyleSheet.create({
   },
   infoPillText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: moderateScale(isSmallScreen ? 11 : 13),
     fontWeight: '600',
     letterSpacing: 0.2,
   },
   title: {
-    fontSize: 24,
+    fontSize: moderateScale(isSmallScreen ? 20 : 24),
     fontWeight: '600',
     color: '#0a0a0a',
-    marginBottom: 20,
+    marginBottom: verticalScale(20),
     textAlign: 'center',
     letterSpacing: -0.5,
   },
   titleSpaced: {
-    marginBottom: 24,
+    marginBottom: verticalScale(24),
   },
   input: {
     width: '100%',
-    maxWidth: 400,
-    minHeight: 120,
+    maxWidth: scale(400),
+    minHeight: verticalScale(isSmallScreen ? 100 : 120),
     borderWidth: 1,
     borderColor: '#e5e5e5',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
+    borderRadius: scale(12),
+    padding: scale(isSmallScreen ? 12 : 16),
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     color: '#0a0a0a',
     textAlignVertical: 'top',
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
   },
   pickerContainer: {
     width: '100%',
-    maxWidth: 400,
-    marginBottom: 12,
+    maxWidth: scale(400),
+    marginBottom: verticalScale(12),
   },
   propertyUnitRow: {
     flexDirection: 'row',
     width: '100%',
-    maxWidth: 400,
-    marginBottom: 12,
-    gap: 8,
+    maxWidth: scale(400),
+    marginBottom: verticalScale(12),
+    gap: scale(8),
   },
   pickerProperty: {
     flex: 3,
@@ -1239,16 +1261,16 @@ const styles = StyleSheet.create({
   },
   pickerUnit: {
     flex: 1,
-    minWidth: 100,
+    minWidth: scale(100),
   },
   button: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: scale(12),
+    padding: verticalScale(isSmallScreen ? 14 : 18),
     alignItems: 'center',
   },
   buttonDisabled: {
@@ -1256,24 +1278,24 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#0a0a0a',
-    fontSize: 16,
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     fontWeight: '600',
     letterSpacing: 0.3,
   },
   startJobButton: {
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   recordButtonContainer: {
     alignItems: 'center',
     width: '100%',
-    maxWidth: 400,
-    marginTop: 8,
-    marginBottom: 8,
+    maxWidth: scale(400),
+    marginTop: verticalScale(isSmallScreen ? 4 : 8),
+    marginBottom: verticalScale(isSmallScreen ? 4 : 8),
   },
   recordButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: scale(isSmallScreen ? 52 : 64),
+    height: scale(isSmallScreen ? 52 : 64),
+    borderRadius: scale(isSmallScreen ? 26 : 32),
     backgroundColor: 'transparent',
     borderWidth: 2,
     borderColor: '#b45555',
@@ -1294,25 +1316,25 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   recordingHint: {
-    marginTop: 10,
-    fontSize: 14,
+    marginTop: verticalScale(10),
+    fontSize: moderateScale(isSmallScreen ? 12 : 14),
     color: '#b45555',
     fontWeight: '500',
   },
   endButtonContainer: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
     alignItems: 'center',
   },
   endButton: {
     borderColor: '#0a0a0a',
   },
   endJobButton: {
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   postSessionContainer: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
   },
   postSessionContainerFlex: {
     flex: 1,
@@ -1322,55 +1344,55 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 1,
     backgroundColor: '#e5e5e5',
-    marginVertical: 16,
+    marginVertical: verticalScale(16),
   },
   choiceButton: {
     width: '100%',
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: scale(12),
+    padding: verticalScale(isSmallScreen ? 14 : 18),
     alignItems: 'center',
   },
   clockOutChoiceButton: {
     borderColor: '#dc2626',
   },
   choiceButtonText: {
-    fontSize: 18,
+    fontSize: moderateScale(isSmallScreen ? 16 : 18),
     fontWeight: '600',
     color: '#0a0a0a',
     letterSpacing: 0.3,
   },
   clockOutChoiceText: {
-    fontSize: 18,
+    fontSize: moderateScale(isSmallScreen ? 16 : 18),
     fontWeight: '600',
     color: '#dc2626',
     letterSpacing: 0.3,
   },
   todayEntriesContainer: {
     width: '100%',
-    marginTop: 20,
+    marginTop: verticalScale(20),
     flex: 0.6,
   },
   todayEntriesContainerFlex: {
     width: '100%',
     flex: 1,
-    marginTop: 10,
+    marginTop: verticalScale(10),
   },
   todayEntriesTitle: {
-    fontSize: 15,
+    fontSize: moderateScale(isSmallScreen ? 13 : 15),
     fontWeight: '600',
     color: '#0a0a0a',
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
     letterSpacing: -0.3,
   },
   todayEntriesBox: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#e5e5e5',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: scale(12),
+    padding: scale(isSmallScreen ? 8 : 12),
     backgroundColor: '#fafafa',
   },
   todayEntriesList: {
@@ -1378,9 +1400,9 @@ const styles = StyleSheet.create({
   },
   entryCard: {
     backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: scale(10),
+    padding: scale(isSmallScreen ? 10 : 14),
+    marginBottom: verticalScale(10),
     borderWidth: 1,
     borderColor: '#e5e5e5',
   },
@@ -1388,35 +1410,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: verticalScale(6),
   },
   entryTime: {
-    fontSize: 14,
+    fontSize: moderateScale(isSmallScreen ? 12 : 14),
     fontWeight: '500',
     color: '#0a0a0a',
   },
   entryDuration: {
-    fontSize: 14,
+    fontSize: moderateScale(isSmallScreen ? 12 : 14),
     fontWeight: '600',
     color: '#6b7280',
   },
   entryNotes: {
-    fontSize: 14,
+    fontSize: moderateScale(isSmallScreen ? 12 : 14),
     color: '#374151',
-    marginBottom: 8,
+    marginBottom: verticalScale(8),
   },
   entryTags: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: scale(6),
   },
   entryTag: {
-    fontSize: 12,
+    fontSize: moderateScale(isSmallScreen ? 10 : 12),
     color: '#6b7fa3',
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
+    paddingHorizontal: scale(8),
+    paddingVertical: verticalScale(3),
+    borderRadius: scale(4),
     overflow: 'hidden',
   },
   categoryTag: {
@@ -1427,107 +1449,107 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#dc2626',
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: scale(12),
+    padding: verticalScale(isSmallScreen ? 14 : 18),
     alignItems: 'center',
   },
   clockOutButtonText: {
     color: '#dc2626',
-    fontSize: 16,
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     fontWeight: '600',
     letterSpacing: 0.3,
   },
   titleWithDivider: {
-    marginTop: -60,
-    marginBottom: 16,
+    marginTop: verticalScale(isSmallScreen ? -40 : -60),
+    marginBottom: verticalScale(16),
   },
   titleDivider: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
     height: 1,
     backgroundColor: '#e5e5e5',
-    marginBottom: 24,
+    marginBottom: verticalScale(isSmallScreen ? 16 : 24),
   },
   clockInButton: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: scale(400),
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#4a9f7e',
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: scale(12),
+    padding: verticalScale(isSmallScreen ? 14 : 18),
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: verticalScale(12),
   },
   clockInButtonText: {
     color: '#4a9f7e',
-    fontSize: 16,
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     fontWeight: '600',
     letterSpacing: 0.3,
   },
   clockOutConfirmationContainer: {
     flex: 1,
     width: '100%',
-    maxWidth: 400,
-    paddingTop: 20,
+    maxWidth: scale(400),
+    paddingTop: verticalScale(isSmallScreen ? 10 : 20),
   },
   motivatingMessage: {
-    fontSize: 24,
+    fontSize: moderateScale(isSmallScreen ? 20 : 24),
     fontWeight: '600',
     color: '#0a0a0a',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: verticalScale(isSmallScreen ? 12 : 20),
     letterSpacing: -0.5,
   },
   workSummary: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: verticalScale(isSmallScreen ? 12 : 20),
   },
   summaryText: {
-    fontSize: 16,
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     color: '#374151',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: verticalScale(isSmallScreen ? 20 : 24),
   },
   summaryHighlight: {
     fontWeight: '600',
     color: '#0a0a0a',
   },
   confirmationPrompt: {
-    fontSize: 15,
+    fontSize: moderateScale(isSmallScreen ? 13 : 15),
     fontWeight: '600',
     color: '#0a0a0a',
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: verticalScale(4),
   },
   swipeHint: {
-    fontSize: 13,
+    fontSize: moderateScale(isSmallScreen ? 11 : 13),
     color: '#9ca3af',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
   },
   confirmationEntriesContainer: {
     flex: 1,
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   noEntriesText: {
-    fontSize: 14,
+    fontSize: moderateScale(isSmallScreen ? 12 : 14),
     color: '#9ca3af',
     textAlign: 'center',
-    paddingVertical: 20,
+    paddingVertical: verticalScale(20),
   },
   submitButton: {
     width: '100%',
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 18,
+    borderRadius: scale(12),
+    padding: verticalScale(isSmallScreen ? 14 : 18),
     alignItems: 'center',
   },
   submitButtonText: {
     color: '#0a0a0a',
-    fontSize: 16,
+    fontSize: moderateScale(isSmallScreen ? 14 : 16),
     fontWeight: '600',
     letterSpacing: 0.3,
   },

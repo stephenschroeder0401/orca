@@ -37,7 +37,10 @@
       "Bash(find:*)",
       "Bash(claude config:*)",
       "WebFetch(domain:www.notion.so)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(npx expo start --ios)",
+      "Bash(open -a Simulator:*)"
     ],
     "deny": [],
     "ask": []

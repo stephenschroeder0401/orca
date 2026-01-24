@@ -149,8 +149,8 @@ export async function startLocationTracking(): Promise<boolean> {
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.High,
-      timeInterval: 30000, // 30 seconds
-      distanceInterval: 10, // 10 meters minimum movement
+      timeInterval: 10000, // 10 seconds - frequent enough for smooth map interpolation
+      distanceInterval: 0, // Record even when stationary for accurate "who's on" dashboard
       foregroundService: {
         notificationTitle: 'Orca is tracking',
         notificationBody: 'Your work route is being recorded',
@@ -158,8 +158,8 @@ export async function startLocationTracking(): Promise<boolean> {
       },
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
-      deferredUpdatesInterval: 30000,
-      deferredUpdatesDistance: 10,
+      deferredUpdatesInterval: 10000,
+      deferredUpdatesDistance: 0,
     });
 
     console.log('[LocationService] Location tracking started');
