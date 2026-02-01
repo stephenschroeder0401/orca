@@ -23,6 +23,9 @@ interface TimeEntry {
   billing_category_id: string | null;
   unit_id: string | null;
   notes: string | null;
+  status?: string;
+  locked?: boolean;
+  is_editable?: boolean;
 }
 
 interface Property {
@@ -37,7 +40,7 @@ interface BillingCategory {
 
 interface PropertyUnit {
   id: string;
-  unit_name: string;
+  name: string;
   property_id: string;
 }
 
@@ -75,16 +78,32 @@ export default function TimeHistoryScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Read from time_entries (source of truth post-submission)
       const { data, error } = await supabase
         .schema('orca')
-        .from('clock_sessions')
-        .select('*')
+        .from('time_entries')
+        .select('id, start_ts, end_ts, duration_minutes, notes, status, locked, property_id, billing_category_id, unit_id')
         .eq('user_id', user.id)
-        .order('start_time', { ascending: false });
+        .order('start_ts', { ascending: false });
 
       if (error) throw error;
-      console.log('Fetched time entries:', data);
-      setTimeEntries(data || []);
+
+      // Map time_entries columns to TimeEntry interface
+      const entries: TimeEntry[] = (data || []).map(e => ({
+        id: e.id,
+        start_time: e.start_ts,
+        end_time: e.end_ts,
+        property_id: e.property_id,
+        billing_category_id: e.billing_category_id,
+        unit_id: e.unit_id,
+        notes: e.notes,
+        status: e.status,
+        locked: e.locked,
+        is_editable: !e.locked && e.status !== 'invoiced',
+      }));
+
+      console.log('Fetched time entries:', entries);
+      setTimeEntries(entries);
     } catch (error) {
       console.error('Error fetching time entries:', error);
     }
@@ -95,24 +114,21 @@ export default function TimeHistoryScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userAccount } = await supabase
-        .from('user_account')
-        .select('client_id')
+      const { data: orgMember } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('organization_id')
         .eq('user_id', user.id)
         .single();
 
-      if (!userAccount?.client_id) return;
+      if (!orgMember?.organization_id) return;
 
-      // Property is linked to entity, which has client_id
       const { data, error } = await supabase
+        .schema('orca')
         .from('property')
-        .select(`
-          id,
-          name,
-          entity!inner(client_id)
-        `)
-        .eq('entity.client_id', userAccount.client_id)
-        .eq('is_deleted', false)
+        .select('id, name')
+        .eq('organization_id', orgMember.organization_id)
+        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
@@ -127,19 +143,21 @@ export default function TimeHistoryScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userAccount } = await supabase
-        .from('user_account')
-        .select('client_id')
+      const { data: orgMember } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('organization_id')
         .eq('user_id', user.id)
         .single();
 
-      if (!userAccount?.client_id) return;
+      if (!orgMember?.organization_id) return;
 
       const { data, error } = await supabase
-        .from('billing_account')
+        .schema('orca')
+        .from('billing_category')
         .select('id, name')
-        .eq('client_id', userAccount.client_id)
-        .eq('is_deleted', false)
+        .eq('organization_id', orgMember.organization_id)
+        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
@@ -154,26 +172,21 @@ export default function TimeHistoryScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userAccount } = await supabase
-        .from('user_account')
-        .select('client_id')
+      const { data: orgMember } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('organization_id')
         .eq('user_id', user.id)
         .single();
 
-      if (!userAccount?.client_id) return;
+      if (!orgMember?.organization_id) return;
 
-      // Get all units for properties belonging to this client
+      // Get all units for properties belonging to this organization
       const { data, error } = await supabase
+        .schema('orca')
         .from('property_unit')
-        .select(`
-          id,
-          unit_name,
-          property_id,
-          property!inner(entity!inner(client_id))
-        `)
-        .eq('property.entity.client_id', userAccount.client_id)
-        .eq('is_deleted', false)
-        .order('unit_name');
+        .select('id, name, property_id')
+        .order('name');
 
       if (error) throw error;
       setUnits(data || []);
@@ -189,6 +202,13 @@ export default function TimeHistoryScreen() {
   }
 
   async function handleDelete(id: string) {
+    // Check if entry is editable
+    const entry = timeEntries.find(e => e.id === id);
+    if (entry && !entry.is_editable) {
+      Alert.alert('Cannot Delete', 'This entry has been approved or invoiced and cannot be deleted.');
+      return;
+    }
+
     Alert.alert(
       'Delete Time Entry',
       'Are you sure you want to delete this time entry?',
@@ -204,7 +224,7 @@ export default function TimeHistoryScreen() {
             try {
               const { error } = await supabase
                 .schema('orca')
-                .from('clock_sessions')
+                .from('time_entries')
                 .delete()
                 .eq('id', id);
 
@@ -224,6 +244,13 @@ export default function TimeHistoryScreen() {
 
   // Animated delete - no confirmation, swipe gesture is the confirmation
   async function handleAnimatedDelete(id: string) {
+    // Check if entry is editable
+    const entry = timeEntries.find(e => e.id === id);
+    if (entry && !entry.is_editable) {
+      Alert.alert('Cannot Delete', 'This entry has been approved or invoiced and cannot be deleted.');
+      return;
+    }
+
     // Remove from local state immediately (optimistic UI)
     setTimeEntries(prev => prev.filter(entry => entry.id !== id));
 
@@ -231,7 +258,7 @@ export default function TimeHistoryScreen() {
     try {
       const { error } = await supabase
         .schema('orca')
-        .from('clock_sessions')
+        .from('time_entries')
         .delete()
         .eq('id', id);
 
@@ -246,6 +273,13 @@ export default function TimeHistoryScreen() {
 
   // Update a time entry
   async function handleUpdate(id: string, updates: Partial<TimeEntry>) {
+    // Check if entry is editable
+    const entry = timeEntries.find(e => e.id === id);
+    if (entry && !entry.is_editable) {
+      Alert.alert('Cannot Edit', 'This entry has been approved or invoiced and cannot be edited.');
+      throw new Error('Entry is not editable');
+    }
+
     // Optimistic update
     setTimeEntries(prev =>
       prev.map(entry =>
@@ -253,11 +287,31 @@ export default function TimeHistoryScreen() {
       )
     );
 
+    // Map interface field names to time_entries column names
+    const dbUpdates: Record<string, any> = {};
+    if (updates.start_time !== undefined) dbUpdates.start_ts = updates.start_time;
+    if (updates.end_time !== undefined) dbUpdates.end_ts = updates.end_time;
+    if (updates.property_id !== undefined) dbUpdates.property_id = updates.property_id;
+    if (updates.billing_category_id !== undefined) dbUpdates.billing_category_id = updates.billing_category_id;
+    if (updates.unit_id !== undefined) dbUpdates.unit_id = updates.unit_id;
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+
+    // Recalculate duration if times changed
+    if (dbUpdates.start_ts || dbUpdates.end_ts) {
+      const startTs = dbUpdates.start_ts || entry?.start_time;
+      const endTs = dbUpdates.end_ts || entry?.end_time;
+      if (startTs && endTs) {
+        dbUpdates.duration_minutes = Math.floor(
+          (new Date(endTs).getTime() - new Date(startTs).getTime()) / 60000
+        );
+      }
+    }
+
     try {
       const { error } = await supabase
         .schema('orca')
-        .from('clock_sessions')
-        .update(updates)
+        .from('time_entries')
+        .update(dbUpdates)
         .eq('id', id);
 
       if (error) throw error;

@@ -3,6 +3,7 @@
     "name": "orca",
     "slug": "orca",
     "version": "1.0.0",
+    "scheme": "com.shroware.orca",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +16,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.shroware.orca",
       "infoPlist": {
-        "UIBackgroundModes": ["location"],
+        "UIBackgroundModes": [
+          "location"
+        ],
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Orca needs location access to track your work routes and calculate mileage.",
         "NSLocationAlwaysUsageDescription": "Orca needs background location to track routes while you work.",
         "NSLocationWhenInUseUsageDescription": "Orca needs location to track your current work location.",
@@ -36,7 +39,13 @@
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -61,6 +70,12 @@
           "speechRecognitionPermission": "Orca uses speech recognition to convert your voice to text notes."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "96ad344d-63bb-4d5e-a062-2d4f0f89c4c1"
+      }
+    },
+    "owner": "sschroeder0401"
   }
 }

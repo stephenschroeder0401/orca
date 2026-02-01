@@ -35,6 +35,9 @@ interface TimeEntry {
   billing_category_id: string | null;
   unit_id: string | null;
   notes: string | null;
+  status?: string;
+  locked?: boolean;
+  is_editable?: boolean;
 }
 
 interface Property {
@@ -49,7 +52,7 @@ interface BillingCategory {
 
 interface PropertyUnit {
   id: string;
-  unit_name: string;
+  name: string;
   property_id: string;
 }
 
@@ -120,11 +123,11 @@ export default function SwipeableTimeEntry({
 
       try {
         const { data, error } = await supabase
+          .schema('orca')
           .from('property_unit')
-          .select('id, unit_name, property_id')
+          .select('id, name, property_id')
           .eq('property_id', selectedProperty.value)
-          .eq('is_deleted', false)
-          .order('unit_name');
+          .order('name');
 
         if (error) throw error;
         setUnits(data || []);
@@ -133,7 +136,7 @@ export default function SwipeableTimeEntry({
         if (item.unit_id) {
           const matchingUnit = data?.find(u => u.id === item.unit_id);
           if (matchingUnit) {
-            setSelectedUnit({ value: matchingUnit.id, label: matchingUnit.unit_name });
+            setSelectedUnit({ value: matchingUnit.id, label: matchingUnit.name });
           }
         }
       } catch (error) {
@@ -149,6 +152,11 @@ export default function SwipeableTimeEntry({
   };
 
   const handleLongPress = async () => {
+    // Don't allow editing if entry is locked/approved/invoiced
+    if (item.is_editable === false) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsEditing(true);
   };
@@ -244,7 +252,11 @@ export default function SwipeableTimeEntry({
     });
   };
 
+  // Disable swipe-to-delete for non-editable entries
+  const isEntryEditable = item.is_editable !== false;
+
   const panGesture = Gesture.Pan()
+    .enabled(isEntryEditable)
     .activeOffsetX([-10, 10])
     .onStart(() => {
       startX.value = translateX.value;
@@ -430,7 +442,7 @@ export default function SwipeableTimeEntry({
                                 <SelectItem
                                   key={u.id}
                                   value={u.id}
-                                  label={u.unit_name}
+                                  label={u.name}
                                 />
                               ))}
                             </NativeSelectScrollView>
@@ -492,9 +504,22 @@ export default function SwipeableTimeEntry({
                         {formatTime(item.start_time)} -{' '}
                         {item.end_time ? formatTime(item.end_time) : 'In Progress'}
                       </Text>
-                      <Text style={[styles.duration, isPressed && styles.textPressed]}>
-                        {formatDuration(item.start_time, item.end_time)}
-                      </Text>
+                      <View style={styles.headerRight}>
+                        {/* Status badge for locked/approved/invoiced entries */}
+                        {!isEntryEditable && (
+                          <View style={[
+                            styles.statusBadge,
+                            item.status === 'invoiced' && styles.statusBadgeInvoiced,
+                          ]}>
+                            <Text style={styles.statusBadgeText}>
+                              {item.status === 'invoiced' ? '🔒 Invoiced' : '✓ Approved'}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={[styles.duration, isPressed && styles.textPressed]}>
+                          {formatDuration(item.start_time, item.end_time)}
+                        </Text>
+                      </View>
                     </View>
 
                     {item.notes && <Text style={[styles.notes, isPressed && styles.textPressed]}>{item.notes}</Text>}
@@ -510,7 +535,7 @@ export default function SwipeableTimeEntry({
                         {unit && (
                           <View style={styles.detailRow}>
                             <Text style={styles.detailLabel}>Unit</Text>
-                            <Text style={[styles.detailValue, isPressed && styles.textPressed]}>{unit.unit_name}</Text>
+                            <Text style={[styles.detailValue, isPressed && styles.textPressed]}>{unit.name}</Text>
                           </View>
                         )}
                         {billingCategory && (
@@ -571,6 +596,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   timeRange: {
     fontSize: 15,
     fontWeight: '600',
@@ -580,6 +610,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#0a0a0a',
+  },
+  statusBadge: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  statusBadgeInvoiced: {
+    backgroundColor: '#f3e8ff',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#166534',
   },
   notes: {
     fontSize: 14,

@@ -45,9 +45,10 @@ const WorkdayContext = createContext<WorkdayContextType | null>(null);
 
 interface WorkdayProviderProps {
   children: ReactNode;
+  employeeId: string;
 }
 
-export function WorkdayProvider({ children }: WorkdayProviderProps) {
+export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) {
   const [workdayId, setWorkdayId] = useState<string | null>(null);
   const [clockPeriodId, setClockPeriodId] = useState<string | null>(null);
   const [clockSessionId, setClockSessionId] = useState<string | null>(null);
@@ -63,43 +64,36 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
 
   async function refreshState(): Promise<void> {
     try {
-      // Check stored IDs
-      const storedWorkdayId = await getActiveWorkdayId();
-      const storedPeriodId = await getActiveClockPeriodId();
+      // Get stored session ID (still needed for clock session check)
       const storedSessionId = await getActiveClockSessionId();
 
-      // Verify workday is still active on server
-      if (storedWorkdayId) {
-        const { data, error } = await supabase.schema('orca').rpc('get_active_workday');
-        if (!error && data && data.length > 0) {
-          setWorkdayId(data[0].id);
-          setWorkdayStartTime(new Date(data[0].start_time));
-          await setActiveWorkdayId(data[0].id);
-        } else {
-          // Workday no longer active, clear stored ID
-          setWorkdayId(null);
-          setWorkdayStartTime(null);
-          await setActiveWorkdayId(null);
-        }
+      // Always check server for active workday
+      const { data: workdayData, error: workdayError } = await supabase.schema('orca').rpc('get_active_workday');
+      if (!workdayError && workdayData && workdayData.length > 0) {
+        setWorkdayId(workdayData[0].id);
+        setWorkdayStartTime(new Date(workdayData[0].start_time));
+        await setActiveWorkdayId(workdayData[0].id);
+      } else {
+        setWorkdayId(null);
+        setWorkdayStartTime(null);
+        await setActiveWorkdayId(null);
       }
 
-      // Check if there's an active clock period
-      if (storedPeriodId) {
-        const { data, error } = await supabase.schema('orca').rpc('get_active_clock_period');
-        if (!error && data && data.length > 0) {
-          setClockPeriodId(data[0].id);
-          setClockPeriodStartTime(new Date(data[0].start_time));
-          await setActiveClockPeriodId(data[0].id);
-          // Also ensure workday is set from the period
-          if (!workdayId && data[0].workday_id) {
-            setWorkdayId(data[0].workday_id);
-            await setActiveWorkdayId(data[0].workday_id);
-          }
-        } else {
-          setClockPeriodId(null);
-          setClockPeriodStartTime(null);
-          await setActiveClockPeriodId(null);
+      // Always check server for active clock period (don't rely on stored ID)
+      const { data: periodData, error: periodError } = await supabase.schema('orca').rpc('get_active_clock_period');
+      if (!periodError && periodData && periodData.length > 0) {
+        setClockPeriodId(periodData[0].id);
+        setClockPeriodStartTime(new Date(periodData[0].start_time));
+        await setActiveClockPeriodId(periodData[0].id);
+        // Also ensure workday is set from the period
+        if (periodData[0].workday_id) {
+          setWorkdayId(periodData[0].workday_id);
+          await setActiveWorkdayId(periodData[0].workday_id);
         }
+      } else {
+        setClockPeriodId(null);
+        setClockPeriodStartTime(null);
+        await setActiveClockPeriodId(null);
       }
 
       // Check if there's an active clock session
@@ -208,6 +202,16 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
       const result = await clockIn();
       activeWorkdayId = result.workdayId;
       activeClockPeriodId = result.clockPeriodId;
+    } else if (!activeWorkdayId) {
+      // Already clocked in but workdayId is stale - fetch from clock_period
+      const { data: periodData } = await supabase.schema('orca').rpc('get_active_clock_period');
+      if (periodData && periodData.length > 0) {
+        activeWorkdayId = periodData[0].workday_id;
+        setWorkdayId(activeWorkdayId);
+        await setActiveWorkdayId(activeWorkdayId);
+      } else {
+        throw new Error('Could not find active clock period');
+      }
     }
 
     // Start clock session
@@ -240,14 +244,56 @@ export function WorkdayProvider({ children }: WorkdayProviderProps) {
     }
 
     try {
-      // End the clock session
-      const { error } = await supabase
+      // 1. Get the clock session data first
+      const { data: session, error: fetchError } = await supabase
         .schema('orca')
         .from('clock_sessions')
-        .update({ end_time: new Date().toISOString() })
+        .select('*')
+        .eq('id', clockSessionId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // 2. Update end_time on clock_session
+      const endTime = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .schema('orca')
+        .from('clock_sessions')
+        .update({ end_time: endTime })
         .eq('id', clockSessionId);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      // 3. Create time_entry from the clock_session
+      const durationMinutes = Math.floor(
+        (new Date(endTime).getTime() - new Date(session.start_time).getTime()) / 60000
+      );
+
+      const { error: insertError } = await supabase
+        .schema('orca')
+        .from('time_entries')
+        .insert({
+          clock_session_id: clockSessionId,
+          user_id: session.user_id,
+          employee_id: employeeId,
+          client_id: session.client_id,
+          organization_id: session.client_id,
+          property_id: session.property_id,
+          billing_category_id: session.billing_category_id,
+          unit_id: session.unit_id,
+          start_ts: session.start_time,
+          end_ts: endTime,
+          duration_minutes: durationMinutes,
+          notes: session.notes,
+          status: 'draft',
+          source: 'mobile',
+          locked: false,
+        });
+
+      if (insertError) {
+        console.error('[WorkdayContext] Error creating time_entry:', insertError);
+        // Don't throw - clock session was ended successfully
+      }
 
       setClockSessionId(null);
       await setActiveClockSessionId(null);

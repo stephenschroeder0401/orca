@@ -20,7 +20,7 @@ const BASE_WIDTH = 375;
 const BASE_HEIGHT = 812;
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import { ChevronRight, Mic } from 'lucide-react-native';
+import { ChevronRight, Mic, LogOut } from 'lucide-react-native';
 
 // Speech recognition - may not be available in Expo Go
 let ExpoSpeechRecognitionModule: any = null;
@@ -58,7 +58,7 @@ interface BillingCategory {
 
 interface PropertyUnit {
   id: string;
-  unit_name: string;
+  name: string;
   property_id: string;
 }
 
@@ -70,6 +70,9 @@ interface TimeEntry {
   billing_category_id: string | null;
   unit_id: string | null;
   notes: string | null;
+  status?: string;
+  locked?: boolean;
+  is_editable?: boolean;
 }
 
 type ViewState = 'setup' | 'active' | 'post_session' | 'clock_out_confirmation';
@@ -314,11 +317,11 @@ export default function HomeScreen() {
 
       try {
         const { data, error } = await supabase
+          .schema('orca')
           .from('property_unit')
-          .select('id, unit_name, property_id')
+          .select('id, name, property_id')
           .eq('property_id', selectedProperty.value)
-          .eq('is_deleted', false)
-          .order('unit_name');
+          .order('name');
 
         if (error) throw error;
         setUnits(data || []);
@@ -396,23 +399,21 @@ export default function HomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userAccount } = await supabase
-        .from('user_account')
-        .select('client_id')
+      const { data: orgMember } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('organization_id')
         .eq('user_id', user.id)
         .single();
 
-      if (!userAccount?.client_id) return;
+      if (!orgMember?.organization_id) return;
 
       const { data, error } = await supabase
+        .schema('orca')
         .from('property')
-        .select(`
-          id,
-          name,
-          entity!inner(client_id)
-        `)
-        .eq('entity.client_id', userAccount.client_id)
-        .eq('is_deleted', false)
+        .select('id, name')
+        .eq('organization_id', orgMember.organization_id)
+        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
@@ -427,19 +428,21 @@ export default function HomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userAccount } = await supabase
-        .from('user_account')
-        .select('client_id')
+      const { data: orgMember } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('organization_id')
         .eq('user_id', user.id)
         .single();
 
-      if (!userAccount?.client_id) return;
+      if (!orgMember?.organization_id) return;
 
       const { data, error } = await supabase
-        .from('billing_account')
+        .schema('orca')
+        .from('billing_category')
         .select('id, name')
-        .eq('client_id', userAccount.client_id)
-        .eq('is_deleted', false)
+        .eq('organization_id', orgMember.organization_id)
+        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
@@ -458,23 +461,39 @@ export default function HomeScreen() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
+      // Read from time_entries (source of truth post-submission)
       const { data, error } = await supabase
         .schema('orca')
-        .from('clock_sessions')
-        .select('*')
+        .from('time_entries')
+        .select('id, start_ts, end_ts, duration_minutes, notes, status, locked, property_id, billing_category_id, unit_id')
         .eq('user_id', user.id)
-        .gte('start_time', today.toISOString())
-        .order('start_time', { ascending: false });
+        .gte('start_ts', today.toISOString())
+        .order('start_ts', { ascending: false });
 
       if (error) throw error;
-      setTodayEntries(data || []);
+
+      // Map time_entries columns to TimeEntry interface
+      const entries: TimeEntry[] = (data || []).map(e => ({
+        id: e.id,
+        start_time: e.start_ts,
+        end_time: e.end_ts,
+        property_id: e.property_id,
+        billing_category_id: e.billing_category_id,
+        unit_id: e.unit_id,
+        notes: e.notes,
+        status: e.status,
+        locked: e.locked,
+        is_editable: !e.locked && e.status !== 'invoiced',
+      }));
+
+      setTodayEntries(entries);
 
       // Calculate totals if requested (for clock out confirmation)
-      if (calculateTotals && data) {
+      if (calculateTotals && entries.length > 0) {
         let workedMinutes = 0;
         let billedMinutes = 0;
 
-        data.forEach((entry: TimeEntry) => {
+        entries.forEach((entry: TimeEntry) => {
           if (entry.end_time) {
             const start = new Date(entry.start_time).getTime();
             const end = new Date(entry.end_time).getTime();
@@ -607,12 +626,22 @@ export default function HomeScreen() {
   }
 
   function handleSubmitDay() {
-    // Clear the confirmation screen and return to setup
+    // time_entries are already created in endJob()
+    // Just clear the confirmation screen and return to setup
     setViewState('setup');
     setTodayEntries([]);
     setTotalWorkedMinutes(0);
     setTotalBilledMinutes(0);
     setMotivatingMessage('');
+  }
+
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      Alert.alert('Error', error.message || 'Failed to sign out');
+    }
   }
 
   function handleNewTask() {
@@ -731,7 +760,7 @@ export default function HomeScreen() {
                       <SelectItem
                         key={unit.id}
                         value={unit.id}
-                        label={unit.unit_name}
+                        label={unit.name}
                       />
                     ))}
                   </NativeSelectScrollView>
@@ -1089,6 +1118,15 @@ export default function HomeScreen() {
         resizeMode="contain"
       />
 
+      {/* Logout button in top right */}
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogout}
+        activeOpacity={0.7}
+      >
+        <LogOut size={scale(20)} color="#9ca3af" />
+      </TouchableOpacity>
+
       <View style={styles.content}>
         {renderContent()}
       </View>
@@ -1160,6 +1198,13 @@ const styles = StyleSheet.create({
     top: verticalScale(50),
     left: scale(-10),
     opacity: 1,
+    zIndex: 10,
+  },
+  logoutButton: {
+    position: 'absolute',
+    top: verticalScale(56),
+    right: scale(16),
+    padding: scale(8),
     zIndex: 10,
   },
   content: {

@@ -3,9 +3,10 @@ import { supabase } from './supabase';
 
 export interface Employee {
   id: string;
-  user_account_id: string;
-  client_id: string;
+  organization_id: string;
+  organization_member_id: string | null;
   name: string;
+  email: string | null;
 }
 
 export function useAuth() {
@@ -45,10 +46,22 @@ export function useAuth() {
 
   async function fetchEmployee(userId: string) {
     try {
+      // Step 1: Get organization_member for this user
+      const { data: orgMember, error: orgMemberError } = await supabase
+        .schema('orca')
+        .from('organization_member')
+        .select('id, organization_id')
+        .eq('user_id', userId)
+        .single();
+
+      if (orgMemberError) throw orgMemberError;
+
+      // Step 2: Get employee via organization_member_id
       const { data, error } = await supabase
+        .schema('orca')
         .from('employee')
-        .select('id, user_account_id, client_id, name')
-        .eq('user_account_id', userId)
+        .select('id, organization_id, organization_member_id, name, email')
+        .eq('organization_member_id', orgMember.id)
         .single();
 
       if (error) throw error;
