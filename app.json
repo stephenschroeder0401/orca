@@ -17,13 +17,15 @@
       "bundleIdentifier": "com.shroware.orca",
       "infoPlist": {
         "UIBackgroundModes": [
+          "location",
           "location"
         ],
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Orca needs location access to track your work routes and calculate mileage.",
         "NSLocationAlwaysUsageDescription": "Orca needs background location to track routes while you work.",
         "NSLocationWhenInUseUsageDescription": "Orca needs location to track your current work location.",
         "NSMicrophoneUsageDescription": "Orca needs microphone access to transcribe voice notes.",
-        "NSSpeechRecognitionUsageDescription": "Orca uses speech recognition to convert your voice to text notes."
+        "NSSpeechRecognitionUsageDescription": "Orca uses speech recognition to convert your voice to text notes.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
