@@ -13,6 +13,7 @@ import {
   Animated,
   Dimensions,
   useWindowDimensions,
+  Modal,
 } from 'react-native';
 
 // Base dimensions (iPhone 11 Pro / iPhone X)
@@ -21,6 +22,7 @@ const BASE_HEIGHT = 812;
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { ChevronRight, Mic, LogOut } from 'lucide-react-native';
+import * as Linking from 'expo-linking';
 
 // Speech recognition - may not be available in Expo Go
 let ExpoSpeechRecognitionModule: any = null;
@@ -147,6 +149,7 @@ export default function HomeScreen() {
   const pulseAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
   const taskBeforeRecording = useRef('');
   const [isRecordButtonPressed, setIsRecordButtonPressed] = useState(false);
+  const [showLocationPermissionModal, setShowLocationPermissionModal] = useState(false);
 
   // Title slide animation
   const titleSlideAnim = useRef(new Animated.Value(0)).current;
@@ -541,7 +544,7 @@ export default function HomeScreen() {
 
     try {
       // Start job via context (auto-clocks in if needed, then starts task)
-      await startJob({
+      const result = await startJob({
         notes: task,
         propertyId: selectedProperty?.value,
         billingCategoryId: selectedBillingCategory?.value,
@@ -550,6 +553,11 @@ export default function HomeScreen() {
 
       setStartTime(new Date());
       setViewState('active');
+
+      // Show explanation modal if we just clocked in and don't have background permission
+      if (result.didClockIn && !result.hasBackgroundPermission) {
+        setShowLocationPermissionModal(true);
+      }
     } catch (error: any) {
       console.error('Error starting session:', error);
       Alert.alert('Error', error.message || 'Failed to start session');
@@ -558,7 +566,11 @@ export default function HomeScreen() {
 
   async function handleClockIn() {
     try {
-      await clockIn();
+      const result = await clockIn();
+      // Show explanation modal if we don't have background location permission
+      if (!result.hasBackgroundPermission) {
+        setShowLocationPermissionModal(true);
+      }
     } catch (error: any) {
       console.error('Error clocking in:', error);
       Alert.alert('Error', error.message || 'Failed to clock in');
@@ -638,6 +650,8 @@ export default function HomeScreen() {
   async function handleLogout() {
     try {
       await supabase.auth.signOut();
+      // Note: App.js handles clearing state via onAuthStateChange listener
+      // If sign out succeeds, the listener will set user to null and show LoginScreen
     } catch (error: any) {
       console.error('Logout error:', error);
       Alert.alert('Error', error.message || 'Failed to sign out');
@@ -1111,6 +1125,7 @@ export default function HomeScreen() {
     <View style={styles.container} onTouchStart={Keyboard.dismiss}>
       <StatusBar style="auto" />
 
+
       {/* Logo in top left */}
       <Image
         source={require('../assets/orca-logo.png')}
@@ -1138,6 +1153,43 @@ export default function HomeScreen() {
           <ChevronRight size={moderateScale(isSmallScreen ? 12 : 14)} color="#c4c4c4" />
         </View>
       )}
+
+      {/* Location Permission Explanation Modal */}
+      <Modal
+        visible={showLocationPermissionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLocationPermissionModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Enable Background Location</Text>
+            <Text style={styles.modalText}>
+              To track your route and mileage while you work, Orca needs location access set to "Always".
+            </Text>
+            <Text style={styles.modalTextSecondary}>
+              Without this, tracking stops when your phone is locked or Orca is in the background.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalPrimaryButton}
+              onPress={() => {
+                setShowLocationPermissionModal(false);
+                Linking.openSettings();
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalPrimaryButtonText}>Open Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalSecondaryButton}
+              onPress={() => setShowLocationPermissionModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalSecondaryButtonText}>Not Now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1301,12 +1353,14 @@ const styles = StyleSheet.create({
     gap: scale(8),
   },
   pickerProperty: {
-    flex: 3,
+    flex: 2,
     minWidth: 0,
+    overflow: 'hidden',
   },
   pickerUnit: {
     flex: 1,
-    minWidth: scale(100),
+    minWidth: 0,
+    overflow: 'hidden',
   },
   button: {
     width: '100%',
@@ -1597,5 +1651,67 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(isSmallScreen ? 14 : 16),
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: scale(24),
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: scale(16),
+    padding: scale(24),
+    width: '100%',
+    maxWidth: scale(340),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: moderateScale(18),
+    fontWeight: '600',
+    color: '#0a0a0a',
+    textAlign: 'center',
+    marginBottom: verticalScale(12),
+    letterSpacing: -0.3,
+  },
+  modalText: {
+    fontSize: moderateScale(15),
+    color: '#374151',
+    textAlign: 'center',
+    lineHeight: moderateScale(22),
+    marginBottom: verticalScale(8),
+  },
+  modalTextSecondary: {
+    fontSize: moderateScale(13),
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: moderateScale(19),
+    marginBottom: verticalScale(20),
+  },
+  modalPrimaryButton: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: scale(10),
+    paddingVertical: verticalScale(14),
+    alignItems: 'center',
+    marginBottom: verticalScale(10),
+  },
+  modalPrimaryButtonText: {
+    color: '#fff',
+    fontSize: moderateScale(15),
+    fontWeight: '600',
+  },
+  modalSecondaryButton: {
+    paddingVertical: verticalScale(10),
+    alignItems: 'center',
+  },
+  modalSecondaryButtonText: {
+    color: '#6b7280',
+    fontSize: moderateScale(14),
+    fontWeight: '500',
   },
 });

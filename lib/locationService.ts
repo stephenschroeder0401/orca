@@ -131,20 +131,27 @@ export async function requestLocationPermissions(): Promise<{
 }
 
 // Start background location tracking
-export async function startLocationTracking(): Promise<boolean> {
+// Returns: { success: boolean, hasBackgroundPermission: boolean }
+export async function startLocationTracking(): Promise<{ success: boolean; hasBackgroundPermission: boolean }> {
   try {
     // Check if already tracking
     const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
     if (isTracking) {
       console.log('[LocationService] Already tracking, skipping start');
-      return true;
+      const permissions = await checkLocationPermissions();
+      return { success: true, hasBackgroundPermission: permissions.background };
     }
 
     // Verify we have permissions
     const permissions = await checkLocationPermissions();
     if (!permissions.foreground) {
       console.log('[LocationService] No foreground permission, cannot start tracking');
-      return false;
+      return { success: false, hasBackgroundPermission: false };
+    }
+
+    // Warn if no background permission - tracking will stop when app is backgrounded
+    if (!permissions.background) {
+      console.warn('[LocationService] No background permission - tracking will stop when app is backgrounded!');
     }
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
@@ -156,17 +163,19 @@ export async function startLocationTracking(): Promise<boolean> {
         notificationBody: 'Your work route is being recorded',
         notificationColor: '#3b82f6',
       },
+      // iOS-specific: Tell iOS this is automotive navigation so it prioritizes location
+      activityType: Location.ActivityType.AutomotiveNavigation,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
       deferredUpdatesInterval: 10000,
       deferredUpdatesDistance: 0,
     });
 
-    console.log('[LocationService] Location tracking started');
-    return true;
+    console.log('[LocationService] Location tracking started (background permission:', permissions.background, ')');
+    return { success: true, hasBackgroundPermission: permissions.background };
   } catch (err) {
     console.error('[LocationService] Failed to start tracking:', err);
-    return false;
+    return { success: false, hasBackgroundPermission: false };
   }
 }
 

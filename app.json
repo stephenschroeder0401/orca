@@ -25,6 +25,7 @@
         "NSLocationWhenInUseUsageDescription": "Orca needs location to track your current work location.",
         "NSMicrophoneUsageDescription": "Orca needs microphone access to transcribe voice notes.",
         "NSSpeechRecognitionUsageDescription": "Orca uses speech recognition to convert your voice to text notes.",
+        "NSPhotoLibraryUsageDescription": "Orca needs photo library access to attach images to your work notes.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },

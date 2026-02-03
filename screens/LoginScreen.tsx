@@ -67,6 +67,13 @@ export default function LoginScreen() {
 
   const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
+
+    // Safety timeout - ensure we never spin forever
+    const safetyTimeout = setTimeout(() => {
+      console.log('[LoginScreen] Google sign-in safety timeout triggered');
+      setIsGoogleLoading(false);
+    }, 60000); // 60 second max
+
     try {
       // In Expo Go, this creates an exp:// URL
       // In a dev build, this uses the custom scheme
@@ -77,13 +84,20 @@ export default function LoginScreen() {
 
       console.log('OAuth redirect URI:', redirectUri);
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      // Add timeout for the OAuth URL request
+      const oauthPromise = supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUri,
           skipBrowserRedirect: true,
         },
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('OAuth request timed out')), 15000)
+      );
+
+      const { data, error } = await Promise.race([oauthPromise, timeoutPromise]);
 
       if (error) throw error;
 
@@ -92,6 +106,8 @@ export default function LoginScreen() {
           // Use WebBrowser if available (development build)
           const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
 
+          console.log('[LoginScreen] WebBrowser result:', result.type);
+
           if (result.type === 'success' && result.url) {
             const url = new URL(result.url);
             const params = new URLSearchParams(url.hash.substring(1));
@@ -99,11 +115,18 @@ export default function LoginScreen() {
             const refreshToken = params.get('refresh_token');
 
             if (accessToken && refreshToken) {
-              await supabase.auth.setSession({
+              // Add timeout for setSession
+              const setSessionPromise = supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken,
               });
+              const sessionTimeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Set session timed out')), 10000)
+              );
+              await Promise.race([setSessionPromise, sessionTimeout]);
             }
+          } else if (result.type === 'cancel' || result.type === 'dismiss') {
+            console.log('[LoginScreen] User cancelled Google sign-in');
           }
         } else {
           // Fallback: open in system browser (Expo Go)
@@ -114,6 +137,7 @@ export default function LoginScreen() {
       console.error('Google sign-in error:', error);
       Alert.alert('Sign In Failed', error.message || 'Failed to sign in with Google');
     } finally {
+      clearTimeout(safetyTimeout);
       setIsGoogleLoading(false);
     }
   };
@@ -125,11 +149,25 @@ export default function LoginScreen() {
     }
 
     setIsLoading(true);
+
+    // Safety timeout
+    const safetyTimeout = setTimeout(() => {
+      console.log('[LoginScreen] Login safety timeout triggered');
+      setIsLoading(false);
+      Alert.alert('Login Failed', 'Request timed out. Please try again.');
+    }, 15000);
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const loginPromise = supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Login request timed out')), 10000)
+      );
+
+      const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
 
       if (error) throw error;
 
@@ -138,6 +176,7 @@ export default function LoginScreen() {
       console.error('Login error:', error);
       Alert.alert('Login Failed', error.message || 'Invalid email or password');
     } finally {
+      clearTimeout(safetyTimeout);
       setIsLoading(false);
     }
   };

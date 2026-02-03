@@ -26,16 +26,17 @@ interface WorkdayContextType {
   isClockSessionActive: boolean;
   isGpsTracking: boolean;
   hasLocationPermission: boolean;
+  hasBackgroundLocationPermission: boolean; // Critical for tracking when app is backgrounded
 
   // Actions
-  clockIn: (notes?: string) => Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean }>;
+  clockIn: (notes?: string) => Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean; hasBackgroundPermission: boolean }>;
   clockOut: () => Promise<void>;
   startJob: (params: {
     notes?: string;
     propertyId?: string;
     billingCategoryId?: string;
     unitId?: string;
-  }) => Promise<{ workdayId: string; clockSessionId: string }>;
+  }) => Promise<{ workdayId: string; clockSessionId: string; didClockIn: boolean; hasBackgroundPermission: boolean }>;
   endJob: () => Promise<void>;
   endWorkday: () => Promise<void>;
   refreshState: () => Promise<void>;
@@ -56,6 +57,7 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
   const [clockPeriodStartTime, setClockPeriodStartTime] = useState<Date | null>(null);
   const [isGpsTracking, setIsGpsTracking] = useState(false);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [hasBackgroundLocationPermission, setHasBackgroundLocationPermission] = useState(false);
 
   // Check for existing active workday/session on mount
   useEffect(() => {
@@ -120,20 +122,30 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
       // Check permissions
       const permissions = await checkLocationPermissions();
       setHasLocationPermission(permissions.foreground);
+      setHasBackgroundLocationPermission(permissions.background);
     } catch (error) {
       console.error('[WorkdayContext] Error refreshing state:', error);
     }
   }
 
-  async function clockIn(notes?: string): Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean }> {
+  async function clockIn(notes?: string): Promise<{ workdayId: string; clockPeriodId: string; wasReopened: boolean; hasBackgroundPermission: boolean }> {
+    console.log('[WorkdayContext] clockIn called with notes:', notes);
+
     // Call the clock_in RPC
     const { data, error } = await supabase.schema('orca').rpc('clock_in', {
       p_notes: notes || null,
     });
 
+    console.log('[WorkdayContext] clock_in RPC response:', { data, error });
+
     if (error) {
       console.error('[WorkdayContext] Error clocking in:', error);
       throw error;
+    }
+
+    if (!data) {
+      console.error('[WorkdayContext] clock_in returned no data');
+      throw new Error('clock_in RPC returned no data');
     }
 
     const { workday_id, clock_period_id, was_reopened } = data;
@@ -148,16 +160,27 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     // Try to start GPS tracking when clocking in
     const permissions = await requestLocationPermissions();
     setHasLocationPermission(permissions.foreground);
+    setHasBackgroundLocationPermission(permissions.background);
+
+    let hasBackgroundPermission = false;
 
     if (permissions.foreground) {
-      const trackingStarted = await startLocationTracking();
-      setIsGpsTracking(trackingStarted);
+      const trackingResult = await startLocationTracking();
+      setIsGpsTracking(trackingResult.success);
+      setHasBackgroundLocationPermission(trackingResult.hasBackgroundPermission);
+      hasBackgroundPermission = trackingResult.hasBackgroundPermission;
+
+      // Log warning if no background permission - tracking will stop when app is backgrounded
+      if (trackingResult.success && !trackingResult.hasBackgroundPermission) {
+        console.warn('[WorkdayContext] GPS tracking started but NO BACKGROUND PERMISSION - tracking will stop when app is backgrounded');
+      }
     }
 
     return {
       workdayId: workday_id,
       clockPeriodId: clock_period_id,
       wasReopened: was_reopened || false,
+      hasBackgroundPermission,
     };
   }
 
@@ -168,6 +191,12 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     }
 
     try {
+      // End any active job first (creates time_entry from clock_session)
+      if (clockSessionId) {
+        console.log('[WorkdayContext] Ending active job before clocking out...');
+        await endJob();
+      }
+
       const { error } = await supabase.schema('orca').rpc('clock_out');
 
       if (error) throw error;
@@ -193,15 +222,22 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     propertyId?: string;
     billingCategoryId?: string;
     unitId?: string;
-  }): Promise<{ workdayId: string; clockSessionId: string }> {
+  }): Promise<{ workdayId: string; clockSessionId: string; didClockIn: boolean; hasBackgroundPermission: boolean }> {
+    console.log('[WorkdayContext] startJob called with params:', params);
+    console.log('[WorkdayContext] Current state:', { workdayId, clockPeriodId, clockSessionId });
+
     let activeWorkdayId = workdayId;
     let activeClockPeriodId = clockPeriodId;
+    let didClockIn = false;
+    let backgroundPermission = hasBackgroundLocationPermission;
 
     // Clock in if not already clocked in
     if (!activeClockPeriodId) {
       const result = await clockIn();
       activeWorkdayId = result.workdayId;
       activeClockPeriodId = result.clockPeriodId;
+      didClockIn = true;
+      backgroundPermission = result.hasBackgroundPermission;
     } else if (!activeWorkdayId) {
       // Already clocked in but workdayId is stale - fetch from clock_period
       const { data: periodData } = await supabase.schema('orca').rpc('get_active_clock_period');
@@ -215,6 +251,14 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     }
 
     // Start clock session
+    console.log('[WorkdayContext] Calling start_clock_session with:', {
+      p_workday_id: activeWorkdayId,
+      p_notes: params.notes || null,
+      p_property_id: params.propertyId || null,
+      p_billing_category_id: params.billingCategoryId || null,
+      p_unit_id: params.unitId || null,
+    });
+
     const { data: sessionData, error: sessionError } = await supabase.schema('orca').rpc('start_clock_session', {
       p_workday_id: activeWorkdayId,
       p_notes: params.notes || null,
@@ -222,6 +266,8 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
       p_billing_category_id: params.billingCategoryId || null,
       p_unit_id: params.unitId || null,
     });
+
+    console.log('[WorkdayContext] start_clock_session response:', { sessionData, sessionError });
 
     if (sessionError) {
       console.error('[WorkdayContext] Error starting clock session:', sessionError);
@@ -234,6 +280,8 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     return {
       workdayId: activeWorkdayId!,
       clockSessionId: sessionData,
+      didClockIn,
+      hasBackgroundPermission: backgroundPermission,
     };
   }
 
@@ -245,14 +293,21 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
 
     try {
       // 1. Get the clock session data first
+      // Note: Select explicit columns to handle potential column name variations (start_time vs start_ts)
       const { data: session, error: fetchError } = await supabase
         .schema('orca')
         .from('clock_sessions')
-        .select('*')
+        .select('id, user_id, client_id, workday_id, property_id, billing_category_id, unit_id, notes, start_time')
         .eq('id', clockSessionId)
         .single();
 
       if (fetchError) throw fetchError;
+
+      // Validate we have a start time
+      if (!session.start_time) {
+        console.error('[WorkdayContext] Clock session missing start_time:', session);
+        throw new Error('Clock session has no start time');
+      }
 
       // 2. Update end_time on clock_session
       const endTime = new Date().toISOString();
@@ -265,9 +320,19 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
       if (updateError) throw updateError;
 
       // 3. Create time_entry from the clock_session
-      const durationMinutes = Math.floor(
-        (new Date(endTime).getTime() - new Date(session.start_time).getTime()) / 60000
-      );
+      const startTimeMs = new Date(session.start_time).getTime();
+      const endTimeMs = new Date(endTime).getTime();
+      const durationMinutes = Math.floor((endTimeMs - startTimeMs) / 60000);
+
+      // Debug logging for timer issues
+      console.log('[WorkdayContext] Creating time_entry:', {
+        sessionId: clockSessionId,
+        startTime: session.start_time,
+        endTime,
+        startTimeMs,
+        endTimeMs,
+        durationMinutes,
+      });
 
       const { error: insertError } = await supabase
         .schema('orca')
@@ -313,7 +378,22 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     }
 
     try {
-      // This will also close any open clock periods and sessions
+      // End any active job first (creates time_entry from clock_session)
+      if (clockSessionId) {
+        console.log('[WorkdayContext] Ending active job before ending workday...');
+        await endJob();
+      }
+
+      // Clock out if still clocked in
+      if (clockPeriodId) {
+        console.log('[WorkdayContext] Clocking out before ending workday...');
+        const { error: clockOutError } = await supabase.schema('orca').rpc('clock_out');
+        if (clockOutError) {
+          console.error('[WorkdayContext] Error clocking out:', clockOutError);
+        }
+      }
+
+      // End the workday
       const { error } = await supabase.schema('orca').rpc('end_workday', {
         p_workday_id: workdayId,
       });
@@ -352,6 +432,7 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
         isClockSessionActive: !!clockSessionId,
         isGpsTracking,
         hasLocationPermission,
+        hasBackgroundLocationPermission,
         clockIn,
         clockOut,
         startJob,
