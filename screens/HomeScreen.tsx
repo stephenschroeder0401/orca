@@ -540,14 +540,15 @@ export default function HomeScreen() {
   }
 
   async function handleStart() {
-    if (!task.trim()) return;
+    // Property and category are required, notes is optional
+    if (!selectedProperty?.value || !selectedBillingCategory?.value) return;
 
     try {
       // Start job via context (auto-clocks in if needed, then starts task)
       const result = await startJob({
-        notes: task,
-        propertyId: selectedProperty?.value,
-        billingCategoryId: selectedBillingCategory?.value,
+        notes: task.trim() || undefined,
+        propertyId: selectedProperty.value,
+        billingCategoryId: selectedBillingCategory.value,
         unitId: selectedUnit?.value,
       });
 
@@ -610,14 +611,72 @@ export default function HomeScreen() {
 
   async function handleClockOut() {
     try {
-      // Show the clock out confirmation screen immediately
-      setViewState('clock_out_confirmation');
+      // Clock out first - this ends any active job (creating time_entry) then clocks out
+      console.log('[HomeScreen] Starting clock out...');
+      await clockOut();
+      console.log('[HomeScreen] Clock out complete, fetching entries...');
+
+      // Small delay to ensure database consistency
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Fetch today's entries (including the just-ended job)
+      // Do this inline to ensure we have the data before showing the screen
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user');
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .schema('orca')
+        .from('time_entries')
+        .select('id, start_ts, end_ts, duration_minutes, notes, status, locked, property_id, billing_category_id, unit_id')
+        .eq('user_id', user.id)
+        .gte('start_ts', today.toISOString())
+        .order('start_ts', { ascending: false });
+
+      if (error) throw error;
+
+      console.log('[HomeScreen] Fetched entries:', data?.length || 0);
+
+      const entries: TimeEntry[] = (data || []).map(e => ({
+        id: e.id,
+        start_time: e.start_ts,
+        end_time: e.end_ts,
+        property_id: e.property_id,
+        billing_category_id: e.billing_category_id,
+        unit_id: e.unit_id,
+        notes: e.notes,
+        status: e.status,
+        locked: e.locked,
+        is_editable: !e.locked && e.status !== 'invoiced',
+      }));
+
+      // Calculate totals
+      let workedMinutes = 0;
+      let billedMinutes = 0;
+      entries.forEach((entry) => {
+        if (entry.end_time) {
+          const start = new Date(entry.start_time).getTime();
+          const end = new Date(entry.end_time).getTime();
+          const minutes = Math.floor((end - start) / 1000 / 60);
+          workedMinutes += minutes;
+          if (entry.billing_category_id) {
+            billedMinutes += minutes;
+          }
+        }
+      });
+
+      console.log('[HomeScreen] Totals:', { workedMinutes, billedMinutes, entryCount: entries.length });
 
       // Pick a random motivating message
       const randomMessage = MOTIVATING_MESSAGES[Math.floor(Math.random() * MOTIVATING_MESSAGES.length)];
-      setMotivatingMessage(randomMessage);
 
-      // Reset state
+      // Set all state at once
+      setTodayEntries(entries);
+      setTotalWorkedMinutes(workedMinutes);
+      setTotalBilledMinutes(billedMinutes);
+      setMotivatingMessage(randomMessage);
       setStartTime(null);
       setElapsedSeconds(0);
       setTask('');
@@ -626,11 +685,8 @@ export default function HomeScreen() {
       setSelectedUnit(undefined);
       setUnits([]);
 
-      // Fetch today's entries and calculate totals
-      await fetchTodayEntries(true);
-
-      // Clock out after UI has transitioned
-      await clockOut();
+      // Show the clock out confirmation screen
+      setViewState('clock_out_confirmation');
     } catch (error: any) {
       console.error('Error clocking out:', error);
       Alert.alert('Error', error.message || 'Failed to clock out');
@@ -807,10 +863,10 @@ export default function HomeScreen() {
           </Select>
         </View>
 
-        {/* Notes Input */}
+        {/* Notes Input (optional) */}
         <TextInput
           style={styles.input}
-          placeholder="What are you working on?"
+          placeholder="Notes (optional)"
           placeholderTextColor="#999"
           value={task}
           onChangeText={setTask}
@@ -855,7 +911,7 @@ export default function HomeScreen() {
           {/* Title */}
           <Animated.View style={{ transform: [{ translateX: titleSlideAnim }] }}>
             <Text style={[styles.title, styles.titleWithDivider]}>
-              {isClockedIn ? 'What are you working on?' : 'Clock in to start'}
+              {isClockedIn ? 'Start a new job' : 'Clock in to start'}
             </Text>
           </Animated.View>
           <View style={styles.titleDivider} />
@@ -865,11 +921,11 @@ export default function HomeScreen() {
 
         {/* Bottom Buttons - Pinned to Bottom */}
         <View style={styles.bottomButtonContainer}>
-          {/* Start Job Button */}
+          {/* Start Job Button - requires property and category */}
           <TouchableOpacity
-            style={[styles.button, styles.startJobButton, !task.trim() && styles.buttonDisabled]}
+            style={[styles.button, styles.startJobButton, (!selectedProperty?.value || !selectedBillingCategory?.value) && styles.buttonDisabled]}
             onPress={handleStart}
-            disabled={!task.trim()}
+            disabled={!selectedProperty?.value || !selectedBillingCategory?.value}
             activeOpacity={0.7}
           >
             <Text style={styles.buttonText}>Start Job</Text>

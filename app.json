@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.shroware.orca",
+      "buildNumber": "3",
       "infoPlist": {
         "UIBackgroundModes": [
           "location",

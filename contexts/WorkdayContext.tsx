@@ -157,30 +157,18 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     await setActiveWorkdayId(workday_id);
     await setActiveClockPeriodId(clock_period_id);
 
-    // Try to start GPS tracking when clocking in
+    // Request location permissions but DON'T start GPS tracking yet
+    // GPS tracking will start in startJob() AFTER the clock session is created and stored
+    // This prevents location points from being recorded without a clock_session_id
     const permissions = await requestLocationPermissions();
     setHasLocationPermission(permissions.foreground);
     setHasBackgroundLocationPermission(permissions.background);
-
-    let hasBackgroundPermission = false;
-
-    if (permissions.foreground) {
-      const trackingResult = await startLocationTracking();
-      setIsGpsTracking(trackingResult.success);
-      setHasBackgroundLocationPermission(trackingResult.hasBackgroundPermission);
-      hasBackgroundPermission = trackingResult.hasBackgroundPermission;
-
-      // Log warning if no background permission - tracking will stop when app is backgrounded
-      if (trackingResult.success && !trackingResult.hasBackgroundPermission) {
-        console.warn('[WorkdayContext] GPS tracking started but NO BACKGROUND PERMISSION - tracking will stop when app is backgrounded');
-      }
-    }
 
     return {
       workdayId: workday_id,
       clockPeriodId: clock_period_id,
       wasReopened: was_reopened || false,
-      hasBackgroundPermission,
+      hasBackgroundPermission: permissions.background,
     };
   }
 
@@ -277,6 +265,19 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
     setClockSessionId(sessionData);
     await setActiveClockSessionId(sessionData);
 
+    // Start GPS tracking AFTER the clock session ID is stored
+    // This ensures all location points will have the clock_session_id
+    if (!isGpsTracking && hasLocationPermission) {
+      const trackingResult = await startLocationTracking();
+      setIsGpsTracking(trackingResult.success);
+      setHasBackgroundLocationPermission(trackingResult.hasBackgroundPermission);
+      backgroundPermission = trackingResult.hasBackgroundPermission;
+
+      if (trackingResult.success && !trackingResult.hasBackgroundPermission) {
+        console.warn('[WorkdayContext] GPS tracking started but NO BACKGROUND PERMISSION - tracking will stop when app is backgrounded');
+      }
+    }
+
     return {
       workdayId: activeWorkdayId!,
       clockSessionId: sessionData,
@@ -363,8 +364,10 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
       setClockSessionId(null);
       await setActiveClockSessionId(null);
 
-      // Note: We keep the workday active and GPS tracking running
-      // User can start another job or explicitly end the workday
+      // Stop GPS tracking when job ends - locations should only be recorded with a clock_session_id
+      // GPS will restart when user starts a new job
+      await stopLocationTracking();
+      setIsGpsTracking(false);
     } catch (error) {
       console.error('[WorkdayContext] Error ending clock session:', error);
       throw error;
