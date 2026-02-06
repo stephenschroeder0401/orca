@@ -361,6 +361,16 @@ export function WorkdayProvider({ children, employeeId }: WorkdayProviderProps) 
         // Don't throw - clock session was ended successfully
       }
 
+      // 4. Calculate mileage and create trip record via Edge Function
+      const { error: mileageError } = await supabase.functions.invoke('calculate-mileage', {
+        body: { clock_session_id: clockSessionId },
+      });
+
+      if (mileageError) {
+        console.error('[WorkdayContext] Error calculating mileage:', mileageError);
+        // Don't throw - time_entry was created successfully, mileage is non-critical
+      }
+
       setClockSessionId(null);
       await setActiveClockSessionId(null);
 
